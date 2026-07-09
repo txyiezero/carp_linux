@@ -1,0 +1,39 @@
+name: Build CARP Linux
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:13.5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get -y install build-essential linux-headers-amd64
+
+      - name: Build kernel module
+        run: make module
+
+      - name: Build userspace tool
+        run: make userspace
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          cp carp.ko artifacts/
+          cp carp_config artifacts/
+          ls -la artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: carp-linux-debian13.5
+          path: artifacts/
+          retention-days: 30
