@@ -591,7 +591,7 @@ static void __exit carp_exit(void)
 module_init(carp_init);
 module_exit(carp_exit);
 
-MODULE_LICENSE("BSD");
+MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Based on FreeBSD CARP implementation by Michael Shalayeff, Ryan McBride, Gleb Smirnoff");
 MODULE_DESCRIPTION("Common Address Redundancy Protocol (CARP) for Linux");
 MODULE_VERSION("1.0.0");
