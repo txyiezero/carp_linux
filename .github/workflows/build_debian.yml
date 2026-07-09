@@ -19,7 +19,9 @@ jobs:
           apt-get -y install build-essential linux-headers-amd64
 
       - name: Build kernel module
-        run: make module
+        run: |
+          KDIR=$(ls -d /lib/modules/*/build | head -1)
+          make module KDIR=$KDIR
 
       - name: Build userspace tool
         run: make userspace
