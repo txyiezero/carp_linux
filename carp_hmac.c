@@ -9,6 +9,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/crypto.h>
+#include <crypto/hash.h>
 #include <linux/scatterlist.h>
 #include <linux/gfp.h>
 #include <linux/string.h>
@@ -81,7 +82,6 @@ int carp_hmac_generate(struct carp_softc *sc, __u32 counter[2],
 		return -ENOMEM;
 
 	desc->tfm = sc->sc_tfm;
-	desc->flags = 0;
 
 	/* Inner hash */
 	ret = crypto_shash_init(desc);

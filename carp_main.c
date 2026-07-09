@@ -343,7 +343,8 @@ out:
 }
 
 /* IPv4 input handler (mirrors FreeBSD carp_input) */
-static int carp_input(struct sk_buff *skb)
+static int carp_input(struct sk_buff *skb, struct net_device *dev,
+		      struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct iphdr *iph;
 	struct carp_header *ch;
