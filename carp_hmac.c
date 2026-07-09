@@ -9,6 +9,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/crypto.h>
+#include <crypto/hash.h>
 #include <linux/scatterlist.h>
 #include <linux/gfp.h>
 #include <linux/string.h>
