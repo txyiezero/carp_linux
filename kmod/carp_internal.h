@@ -115,10 +115,9 @@ struct carp_softc {
 /* ---- Function declarations: carp_input.c ---- */
 int carp_hmac_init(void);
 void carp_hmac_fini(void);
-void carp_hmac_prepare(struct carp_softc *sc);
 void carp_hmac_generate(struct carp_softc *sc, u32 counter[2], u8 md[20]);
 int carp_hmac_verify(struct carp_softc *sc, u32 counter[2], u8 md[20]);
-int carp_input_c(struct sk_buff *skb, struct carp_header *ch, int af, int ttl);
+void carp_input_c(struct sk_buff *skb, struct carp_header *ch, int af, int ttl);
 int carp_input4(struct sk_buff *skb);
 int carp_input6(struct sk_buff *skb);
 

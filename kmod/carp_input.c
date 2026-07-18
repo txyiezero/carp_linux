@@ -30,10 +30,6 @@ void carp_hmac_fini(void)
 		crypto_free_shash(carp_tfm);
 }
 
-void carp_hmac_prepare(struct carp_softc *sc)
-{
-	/* Using kernel crypto API -- no precomputation needed */
-}
 
 void carp_hmac_generate(struct carp_softc *sc, u32 counter[2], u8 md[20])
 {
@@ -52,11 +48,11 @@ void carp_hmac_generate(struct carp_softc *sc, u32 counter[2], u8 md[20])
 
 	/* IPv4 addresses in sorted order */
 	{
-		struct in_addr sorted_addrs[256];
+		__be32 sorted_addrs[256];
 		int n = 0;
 		for (j = 0; j < sc->sc_naddrs && n < 256; j++) {
 			if (sc->sc_ifas4[j])
-				sorted_addrs[n++] = sc->sc_ifas4[j]->ifa_address;
+				sorted_addrs[n++] = sc->sc_ifas4[j]->ifa_local;
 		}
 		for (j = 1; j < n; j++) {
 			struct in_addr tmp = sorted_addrs[j];
@@ -78,7 +74,7 @@ void carp_hmac_generate(struct carp_softc *sc, u32 counter[2], u8 md[20])
 		int n = 0;
 		for (j = 0; j < sc->sc_naddrs6 && n < 256; j++) {
 			if (sc->sc_ifas6[j])
-				sorted_addrs6[n++] = sc->sc_ifas6[j]->ifra_addr.sin6_addr;
+				sorted_addrs6[n++] = sc->sc_ifas6[j]->addr;
 		}
 		for (j = 1; j < n; j++) {
 			struct in6_addr tmp = sorted_addrs6[j];
@@ -146,7 +142,6 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 	struct carp_softc *sc;
 	u64 tmp_counter;
 	struct timespec64 sc_tv, ch_tv;
-	int error = 0;
 	bool multicast = false;
 
 	rcu_read_lock();
@@ -323,7 +318,7 @@ int carp_input4(struct sk_buff *skb)
 
 	/* Verify checksum */
 	{
-		__sum16 csum = ip_compute_csum(skb, iplen, skb->len - iplen, 0);
+		__sum16 csum = ip_compute_csum(skb->data + iplen, skb->len - iplen);
 		if (csum != 0) {
 			CARPSTATS_INC(carps_badsum);
 			kfree_skb(skb);
