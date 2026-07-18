@@ -55,10 +55,10 @@ void carp_hmac_generate(struct carp_softc *sc, u32 counter[2], u8 md[20])
 				sorted_addrs[n++] = sc->sc_ifas4[j]->ifa_local;
 		}
 		for (j = 1; j < n; j++) {
-			struct in_addr tmp = sorted_addrs[j];
+			__be32 tmp = sorted_addrs[j];
 			k = j - 1;
 			while (k >= 0 &&
-			       ntohl(sorted_addrs[k].s_addr) > ntohl(tmp.s_addr)) {
+			       ntohl(sorted_addrs[k]) > ntohl(tmp)) {
 				sorted_addrs[k + 1] = sorted_addrs[k];
 				k--;
 			}
