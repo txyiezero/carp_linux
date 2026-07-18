@@ -1,19 +1,28 @@
-# Kernel module
-obj-m += carp.o
-carp-objs := carp_main.o carp_hmac.o
+# Top-level Makefile for CARP Linux
+# Builds kernel module and userspace tools
 
-KDIR ?= /lib/modules/$(shell uname -r)/build
+.PHONY: all module tools clean install uninstall test
 
-all: module userspace
+all: module tools
 
 module:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	$(MAKE) -C kmod
 
-userspace: carp_config
-
-carp_config: carp_config.c
-	gcc -Wall -o $@ $<
+tools:
+	$(MAKE) -C tools
 
 clean:
-	$(MAKE) -C $(KDIR) M=$(PWD) clean
-	rm -f carp_config
+	$(MAKE) -C kmod clean
+	$(MAKE) -C tools clean
+
+install: all
+	$(MAKE) -C kmod install
+	$(MAKE) -C tools install
+
+uninstall:
+	rm -f /lib/modules/*/extra/carp.ko
+	rm -f /usr/local/sbin/carpctl
+	depmod -a
+
+test:
+	bash tests/carp_basic.sh
