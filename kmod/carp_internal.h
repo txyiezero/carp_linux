@@ -111,6 +111,8 @@ struct carp_softc {
 };
 
 /* ---- Function declarations: carp_input.c ---- */
+int carp_hmac_init(void);
+void carp_hmac_fini(void);
 void carp_hmac_prepare(struct carp_softc *sc);
 void carp_hmac_generate(struct carp_softc *sc, u32 counter[2], u8 md[20]);
 int carp_hmac_verify(struct carp_softc *sc, u32 counter[2], u8 md[20]);
@@ -119,10 +121,13 @@ int carp_input_c(struct sk_buff *skb, struct carp_header *ch, int af, int ttl);
 /* ---- Function declarations: carp_output.c ---- */
 void carp_prepare_ad(struct carp_softc *sc, struct carp_header *ch, u32 counter[2]);
 void carp_send_ad_locked(struct carp_softc *sc);
+void carp_send_ad_timer(struct timer_list *t);
 void carp_send_ad_error(struct carp_softc *sc, int error);
 void carp_send_arp(struct carp_softc *sc);
 void carp_send_na(struct carp_softc *sc);
 void carp_setrun(struct carp_softc *sc, int af);
+void carp_master_down_timer(struct timer_list *t);
+void carp_master_down6_timer(struct timer_list *t);
 void carp_set_state(struct carp_softc *sc, int state, const char *reason);
 void carp_addroute(struct carp_softc *sc);
 void carp_delroute(struct carp_softc *sc);
@@ -132,6 +137,7 @@ struct carp_softc *sc_lookup_vhid(struct net_device *dev, int vhid);
 int carp_is_supported_dev(struct net_device *dev);
 void carp_sc_state(struct carp_softc *sc);
 void carp_demote_adj(int adj, const char *reason);
+void carp_sendall_work_func(struct work_struct *work);
 struct carp_if *carp_alloc_if(struct net_device *dev);
 void carp_free_if(struct carp_if *cif);
 struct carp_softc *carp_alloc(struct net_device *dev, int vhid);
@@ -150,9 +156,15 @@ u8 *carp_macmatch6(struct net_device *dev, const struct in6_addr *addr);
 int carp_forus(struct net_device *dev, const u8 *dhost);
 int carp_is_master(struct net_device *dev, int vhid);
 int carp_get_vhid(struct net_device *dev, __be32 addr);
+extern struct work_struct carp_sendall_work;
+extern struct list_head carp_if_list;
+extern rwlock_t carp_lock;
+extern struct carpstats __percpu *carp_stats;
 
 /* ---- Source address selection (carp_output.c) ---- */
 struct in_ifaddr *carp_best_ifa4(struct net_device *dev);
 struct in6_ifaddr *carp_best_ifa6(struct net_device *dev);
+
+/* NF hook registered in carp_main.c */
 
 #endif /* _CARP_INTERNAL_H */

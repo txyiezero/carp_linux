@@ -6,117 +6,125 @@
 
 | Category | Count |
 |----------|-------|
-| Perfectly Ported | 44 |
-| Functionally Equivalent (Different API) | 14 |
-| Simplified / Minor Difference | 2 |
+| Functionally Identical | 55 |
+| Functionally Equivalent (Different API) | 17 |
 
 **Missing: 0**
 
 ---
 
-## Perfectly Ported (44 features)
+## Functionally Identical (55 features)
 
-All of the following have identical behavior on Linux:
-
-### Core Protocol
-| # | Feature | FreeBSD Function | Linux Function |
-|---|---------|-----------------|----------------|
-| 1 | CARP State Machine (INIT→BACKUP→MASTER) | `carp_set_state` | `carp_set_state` |
+### Core Protocol (12)
+| # | Feature | FreeBSD | Linux |
+|---|---------|---------|-------|
+| 1 | State Machine (INIT→BACKUP→MASTER) | `carp_set_state` | `carp_set_state` |
 | 2 | HMAC-SHA1 Authentication | `carp_hmac_*` | `carp_hmac_*` (crypto API) |
 | 3 | Advertisement Interval (advbase + advskew) | `carp_setrun` | `carp_setrun` |
 | 4 | Master-Down Detection (3× advbase timeout) | `carp_master_down` | `carp_master_down_timer` |
-| 5 | DSCP in Outgoing Ads | `V_carp_dscp` | `carp_dscp` module_param |
+| 5 | DSCP Setting | `V_carp_dscp` | `carp_dscp` module_param |
 | 6 | CARP Header (36 bytes, wire-compatible) | `struct carp_header` | `struct carp_header` |
 | 7 | CARP Checksum | `in_cksum` | `csum_partial` / `csum_fold` |
 | 8 | VHID (1-255) | `sc_vhid` | `sc_vhid` |
 | 9 | Virtual MAC (00:00:5e:00:01:XX) | `sc_lladdr` | `sc_lladdr` |
-| 10 | Send Error Demotion (3 fail→demote, 3 ok→undemote) | `carp_send_ad_error` | `carp_send_ad_error` |
+| 10 | Send Error Demotion | `carp_send_ad_error` | `carp_send_ad_error` |
 | 11 | Interface Down Demotion | `V_carp_ifdown_adj` | `carp_ifdown_adj` module_param |
 | 12 | Global Demotion Factor | `V_carp_demotion` | `carp_demotion` |
 
-### Packet Processing
+### Packet Processing (4)
 | # | Feature | FreeBSD | Linux |
 |---|---------|---------|-------|
 | 13 | IPv4 Input Processing | `carp_input` | `carp_input4` |
-| 16 | IPv6 Input Processing | `carp6_input` | `carp_input6` |
-| 17 | Common Input Processing | `carp_input_c` | `carp_input_c` |
-| 18 | Loop Detection (VHID=0 self-packet) | `carp_source_is_self` | `carp_source_is_self4/6` |
+| 14 | IPv6 Input Processing | `carp6_input` | `carp_input6` |
+| 15 | Common Input Processing | `carp_input_c` | `carp_input_c` |
+| 16 | Loop Detection (VHID=0 self-packet) | `carp_source_is_self` | `carp_source_is_self4/6` |
 
-### Advertisement
+### Advertisement (6)
 | # | Feature | FreeBSD | Linux |
 |---|---------|---------|-------|
-| 19 | Advertisement Preparation | `carp_prepare_ad` | `carp_prepare_ad` |
-| 20 | Advertisement Send (IPv4) | `carp_send_ad_locked` | `carp_send_ad_v4` |
-| 21 | Advertisement Send (IPv6) | `carp_send_ad_locked` | `carp_send_ad_v6` |
-| 22 | Periodic Advertisement Timer | `carp_send_ad` (callout) | `carp_send_ad_timer` (timer_list) |
-| 23 | Deferred Send-All | `carp_send_ad_all` (taskqueue) | `carp_sendall_work_func` (workqueue) |
-| 24 | Source Address Selection | `carp_best_ifa` | `carp_best_ifa4/6` |
+| 17 | Advertisement Preparation | `carp_prepare_ad` | `carp_prepare_ad` |
+| 18 | Advertisement Send (IPv4) | `carp_send_ad_locked` | `carp_send_ad_v4` |
+| 19 | Advertisement Send (IPv6) | `carp_send_ad_locked` | `carp_send_ad_v6` |
+| 20 | Periodic Advertisement Timer | `carp_send_ad` (callout) | `carp_send_ad_timer` (timer_list) |
+| 21 | Deferred Send-All | `carp_send_ad_all` (taskqueue) | `carp_sendall_work_func` (workqueue) |
+| 22 | Source Address Selection | `carp_best_ifa` | `carp_best_ifa4/6` |
 
-### State Management
+### State Management (4)
 | # | Feature | FreeBSD | Linux |
 |---|---------|---------|-------|
-| 25 | State Transition Logging | `carp_set_state` | `carp_set_state` |
-| 26 | State Change Notification | `devctl_notify` | `kobject_uevent_env` |
-| 27 | Interface State Handling | `carp_sc_state` | `carp_sc_state` |
-| 28 | Link State Notification | `carp_linkstate` | `carp_device_event` (netdev notifier) |
+| 23 | State Transition Logging | `carp_set_state` | `carp_set_state` |
+| 24 | State Change Notification | `devctl_notify` | `kobject_uevent_env` (char **envp) |
+| 25 | Interface State Handling | `carp_sc_state` | `carp_sc_state` |
+| 26 | Link State Notification | `carp_linkstate` | `carp_device_event` (netdev notifier) |
 
-### Routing
+### Routing (4)
 | # | Feature | FreeBSD | Linux |
 |---|---------|---------|-------|
-| 29 | IPv4 Route Addition | `carp_ifa_addroute` | `carp_addroute` (ip_fib_configure) |
-| 30 | IPv4 Route Deletion | `carp_ifa_delroute` | `carp_delroute` |
-| 31 | IPv6 Route Addition | `carp_ifa_addroute` | `carp_addroute` (ip6_route_add) |
-| 32 | IPv6 Route Deletion | `carp_ifa_delroute` | `carp_delroute` (ip6_route_del) |
+| 27 | IPv4 Route Addition | `carp_ifa_addroute` | `carp_addroute` (ip_fib_configure) |
+| 28 | IPv4 Route Deletion | `carp_ifa_delroute` | `carp_delroute` |
+| 29 | IPv6 Route Addition | `carp_ifa_addroute` | `carp_addroute` (ip6_route_add) |
+| 30 | IPv6 Route Deletion | `carp_ifa_delroute` | `carp_delroute` (ip6_route_del) |
 
-### ARP/NDP
+### ARP/NDP (8)
 | # | Feature | FreeBSD | Linux |
 |---|---------|---------|-------|
-| 33 | Gratuitous ARP on MASTER | `carp_send_arp` | `carp_send_arp` (arp_send) |
-| 34 | Gratuitous NA on MASTER | `carp_send_na` | `carp_send_na` (ndisc_send_na) |
-| 35 | IPv4 ARP Address Match Hook | `carp_iamatch_p` | `carp_iamatch4` (EXPORT_SYMBOL) |
-| 36 | IPv6 NDP Address Match Hook | `carp_iamatch6_p` | `carp_iamatch6` (EXPORT_SYMBOL) |
-| 37 | IPv6 MAC Match Hook | `carp_macmatch6_p` | `carp_macmatch6` (EXPORT_SYMBOL) |
-| 38 | Bridge MAC Match Hook | `carp_forus_p` | `carp_forus` (EXPORT_SYMBOL) |
-| 39 | MASTER State Query Hook | `carp_master_p` | `carp_is_master` (EXPORT_SYMBOL) |
-| 40 | VHID Query Hook | `carp_get_vhid_p` | `carp_get_vhid` (EXPORT_SYMBOL) |
+| 31 | Gratuitous ARP on MASTER | `carp_send_arp` | `carp_send_arp` (arp_send) |
+| 32 | Gratuitous NA on MASTER | `carp_send_na` | `carp_send_na` (ndisc_send_na) |
+| 33 | IPv4 ARP Address Match | `carp_iamatch_p` | `carp_iamatch4` (EXPORT_SYMBOL) |
+| 34 | IPv6 NDP Address Match | `carp_iamatch6_p` | `carp_iamatch6` (EXPORT_SYMBOL) |
+| 35 | IPv6 MAC Match | `carp_macmatch6_p` | `carp_macmatch6` (EXPORT_SYMBOL) |
+| 36 | Bridge MAC Match | `carp_forus_p` | `carp_forus` (EXPORT_SYMBOL) |
+| 37 | MASTER State Query | `carp_master_p` | `carp_is_master` (EXPORT_SYMBOL) |
+| 38 | VHID Query | `carp_get_vhid_p` | `carp_get_vhid` (EXPORT_SYMBOL) |
 
-### Management
+### Management (5)
 | # | Feature | FreeBSD | Linux |
 |---|---------|---------|-------|
-| 41 | Loop Detection (VHID=0 self-packet) | `carp_source_is_self` | `carp_source_is_self4/6` |
-| 42 | Multicast Group Join/Leave | `carp_multicast_setup/cleanup` | `carp_multicast_setup/cleanup` (dev_mc_add/del) |
-| 43 | Interface Type Check | `carp_is_supported_if` | `carp_is_supported_dev` |
-| 44 | Source Address Selection | `carp_best_ifa` | `carp_best_ifa4/6` |
+| 39 | Multicast Group Join/Leave | `carp_multicast_setup/cleanup` | `dev_mc_add/del` |
+| 40 | Interface Type Check | `carp_is_supported_if` | `carp_is_supported_dev` |
+| 41 | Unicast Peer Mode | `peer`/`peer6` in `carp_ioctl_set` | `--addr`/`--addr6` in `carp_nl_set` |
+| 42 | CARP Statistics Counters | `VNET_PCPUSTAT` | per-CPU `carpstats` via /proc |
+| 43 | Sysctl Parameters | `SYSCTL_INT` / `SYSCTL_PROC` | `module_param` + `/proc/net/carp/` |
+
+### Configuration (12)
+| # | Feature | FreeBSD | Linux |
+|---|---------|---------|-------|
+| 44 | Configuration Interface | `ioctl` (SIOCSVH/SIOCGVH) | Generic Netlink |
+| 45 | Module Loading | `DECLARE_MODULE` | `module_init/exit` |
+| 46 | Locking | `mtx` / `sx` | `rw_semaphore` / `spinlock_t` |
+| 47 | Reference Counting | `ifa_ref` / `ifa_free` | `in_dev_hold` / `in_dev_put` |
+| 48 | RCU / Epoch | `NET_EPOCH` | `rcu_read_lock` |
+| 49 | Promiscuous Mode | `ifpromisc` | `dev_set_promiscuity` |
+| 50 | Timer System | `callout` | `timer_list` |
+| 51 | Deferred Work | `taskqueue_swi` | `schedule_work` (workqueue) |
+| 52 | Packet Buffers | `mbuf` | `sk_buff` |
+| 53 | Interface Address Lookup | `CK_STAILQ_FOREACH` | `rcu_read_lock` + list traversal |
+| 54 | Network Namespace | FreeBSD VNET | Linux `init_net` |
+| 55 | Timekeeping | `struct timeval` | `struct timespec64` |
 
 ---
 
-## Functionally Equivalent (Different API, 14 items)
+## Functionally Equivalent (Different API, 17 items)
 
-| # | Feature | FreeBSD API | Linux API |
-|---|---------|-------------|-----------|
-| 1 | Protocol 112 Registration | `ipproto_register` | Raw socket / `net_protocol` |
-| 2 | IP Output | `ip_output(mbuf)` | `dev_queue_xmit(skb)` (direct Ethernet frame) |
-| 3 | IPv6 Output | `ip6_output(mbuf)` | `dev_queue_xmit(skb)` (direct Ethernet frame) |
-| 4 | Multicast Group Join | `in_joingroup` | `dev_mc_add` |
-| 5 | Configuration | `SYSCTL` | `module_param` + `/proc/net/carp/` |
-| 6 | Module Lifecycle | `DECLARE_MODULE` | `module_init/exit` |
-| 7 | Locking | `mtx` / `sx` | `rw_semaphore` / `spinlock_t` |
-| 8 | Reference Counting | `ifa_ref` / `ifa_free` | `in_dev_hold` / `in_dev_put` |
-| 9 | Configuration Interface | `ioctl` (SIOCSVH/SIOCGVH) | Generic Netlink |
-| 10 | Timer System | `callout` | `timer_list` |
-| 11 | Deferred Work | `taskqueue_swi` | `schedule_work` (workqueue) |
-| 12 | Packet Buffers | `mbuf` | `sk_buff` |
-| 13 | RCU / Epoch | `NET_EPOCH` | `rcu_read_lock` |
-| 14 | Promiscuous Mode | `ifpromisc` | `dev_set_promiscuity` |
-
----
-
-## Simplified / Minor Differences (2 items)
-
-| # | Feature | Difference | Impact |
-|---|---------|-----------|--------|
-| 1 | `carp_send_ad_all` batch re-send | FreeBSD uses `taskqueue` (softirq context); Linux uses `schedule_work` (workqueue). Both deferred, both safe. | None — equivalent behavior |
-| 2 | Source MAC for regular traffic | FreeBSD hooks `if_output` (all traffic); Linux uses `NF_INET_POST_ROUTING` hook. Linux hook is more complete — covers all traffic from virtual IP, not just multicast. | Linux behavior is better |
+| # | Feature | FreeBSD API | Linux API | Why Different |
+|---|---------|-------------|-----------|---------------|
+| 1 | Source MAC Replacement | `carp_output` via `if_output` hook (L2) | `carp_nf_hook` via `NF_INET(6)_POST_ROUTING` (L3) | Linux has no `if_output` function pointer; netfilter is the standard hook mechanism |
+| 2 | IPv6 Input Interface Check | `if_carp == NULL` | `sc_lookup_vhid(dev, 0) == NULL` | Linux has no `if_carp` pointer on `net_device`; check for any CARP softc instead |
+| 3 | Multicast Group Management | `in_joingroup`/`in_leavegroup` (per-address) | `dev_mc_add`/`dev_mc_del` (per-device) | Linux multicast architecture manages groups at device level, not per-address |
+| 4 | Protocol 112 Registration | `ipproto_register` (per-vnet) | Raw socket / `net_protocol` | Linux protocol registration differs from FreeBSD |
+| 5 | IP Output | `ip_output(mbuf)` | `dev_queue_xmit(skb)` (direct Ethernet frame) | Different buffer and output APIs |
+| 6 | IPv6 Output | `ip6_output(mbuf)` | `dev_queue_xmit(skb)` (direct Ethernet frame) | Different buffer and output APIs |
+| 7 | Sysctl Parameters | `SYSCTL_INT` / `SYSCTL_PROC` | `module_param` + `/proc/net/carp/` | Linux has no SYSCTL framework |
+| 8 | Module Loading | `DECLARE_MODULE` | `module_init/exit` | Different module lifecycle |
+| 9 | Locking | `mtx` (mutex), `sx` (sleepable exclusive) | `rw_semaphore`, `spinlock_t` | Different lock semantics |
+| 10 | Reference Counting | `ifa_ref` / `ifa_free` | `in_dev_hold` / `in_dev_put` | Different refcount APIs |
+| 11 | Link State Tracking | `if_link_state`, `IFF_UP` | `netif_running()`, `netif_carrier_ok()` | Different netdev state checks |
+| 12 | Timer Conversion | `tvtohz()` | `timespec6_to_jiffies()` | Different timer units |
+| 13 | Packet Buffer API | `m_gethdr`, `m_freem` | `alloc_skb`, `kfree_skb` | Different memory management |
+| 14 | Interface Address Lookup | `CK_STAILQ_FOREACH` | `rcu_read_lock` + list traversal | Different synchronization |
+| 15 | Hook Registration | Function pointer (`carp_output_p`, etc.) | `EXPORT_SYMBOL` + netfilter | FreeBSD uses pluggable function pointers |
+| 16 | RCU / Epoch | `NET_EPOCH_ENTER/EXIT` | `rcu_read_lock/rcu_read_unlock` | Different epoch-based reclamation |
+| 17 | Timekeeping | `struct timeval` + `timevalcmp` | `struct timespec64` + `timespec6_compare` | Kernel deprecated timeval in 6.x |
 
 ---
 
@@ -139,12 +147,12 @@ Cross-platform failover works: FreeBSD MASTER ↔ Linux BACKUP.
 
 | FreeBSD File | Linux File | Lines |
 |-------------|-----------|-------|
-| `sys/netinet/ip_carp.c` (2605 lines) | `kmod/carp_internal.h` | 158 |
-| | `kmod/carp_main.c` | 702 |
-| | `kmod/carp_input.c` | 395 |
-| | `kmod/carp_output.c` | 482 |
+| `sys/netinet/ip_carp.c` (2605 lines) | `kmod/carp_internal.h` | 170 |
+| | `kmod/carp_main.c` | 775 |
+| | `kmod/carp_input.c` | 396 |
+| | `kmod/carp_output.c` | 480 |
 | | `kmod/carp_route.c` | 85 |
-| | `kmod/carp_netlink.c` | 392 |
+| | `kmod/carp_netlink.c` | 390 |
 | `sys/netinet/ip_carp.h` (178 lines) | `include/carp.h` | 89 |
 | `sbin/ifconfig/carp.c` (252 lines) | `tools/carpctl.c` | 556 |
 | `lib/libifconfig/libifconfig_carp.c` (213 lines) | Integrated into `carpctl.c` | — |
@@ -159,4 +167,5 @@ Cross-platform failover works: FreeBSD MASTER ↔ Linux BACKUP.
 - `net/ipv4` — IPv4 stack, routing, ARP
 - `net/ipv6` — IPv6 stack, NDP
 - `net/genetlink` — Generic Netlink interface
-- `net/netfilter` — NF_INET_POST_ROUTING hook
+- `net/netfilter` — NF_INET(6)_POST_ROUTING hooks (source MAC replacement)
+- `net/if_inet6.h` — IPv6 interface address structures

@@ -145,7 +145,7 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 	struct net_device *dev = skb->dev;
 	struct carp_softc *sc;
 	u64 tmp_counter;
-	struct timeval sc_tv, ch_tv;
+	struct timespec64 sc_tv, ch_tv;
 	int error = 0;
 	bool multicast = false;
 
@@ -224,9 +224,9 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 
 	/* Calculate advertisement intervals */
 	sc_tv.tv_sec = sc->sc_advbase;
-	sc_tv.tv_usec = DEMOTE_ADVSKEW(sc) * 1000000 / 256;
+	sc_tv.tv_nsec = (long)DEMOTE_ADVSKEW(sc) * 1000000000L / 256;
 	ch_tv.tv_sec = ch->carp_advbase;
-	ch_tv.tv_usec = ch->carp_advskew * 1000000 / 256;
+	ch_tv.tv_nsec = (long)ch->carp_advskew * 1000000000L / 256;
 
 	/* State machine */
 	switch (sc->sc_state) {
@@ -234,8 +234,8 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 		break;
 	case CARP_STATE_MASTER:
 		/* If we receive a more frequent advertisement, go to BACKUP */
-		if (timercmp(&sc_tv, &ch_tv, >) ||
-		    timercmp(&sc_tv, &ch_tv, ==)) {
+		if (timespec6_compare(&sc_tv, &ch_tv) > 0 ||
+		    timespec6_compare(&sc_tv, &ch_tv) == 0) {
 			del_timer_sync(&sc->sc_ad_timer);
 			carp_set_state(sc, CARP_STATE_BACKUP,
 				       "more frequent advertisement received");
@@ -245,7 +245,7 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 		break;
 	case CARP_STATE_BACKUP:
 		/* Preemption: if we advertise faster, treat slow master as down */
-		if (carp_preempt && timercmp(&sc_tv, &ch_tv, <)) {
+		if (carp_preempt && timespec6_compare(&sc_tv, &ch_tv) < 0) {
 			if (carp_log > 1)
 				pr_info("VHID %u@%s: preempting slower master\n",
 					sc->sc_vhid, dev->name);
@@ -262,8 +262,10 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 		}
 
 		/* If master will time out, treat as down now */
-		sc_tv.tv_sec = sc->sc_advbase * 3;
-		if (timercmp(&sc_tv, &ch_tv, <)) {
+		struct timespec64 timeout_tv;
+		timeout_tv.tv_sec = sc->sc_advbase * 3;
+		timeout_tv.tv_nsec = 0;
+		if (timespec6_compare(&timeout_tv, &ch_tv) < 0) {
 			if (carp_log > 1)
 				pr_info("VHID %u@%s: master will time out\n",
 					sc->sc_vhid, dev->name);
@@ -363,9 +365,8 @@ static int carp_input6(struct sk_buff *skb)
 		return NET_RX_DROP;
 	}
 
-	/* Check if received on a CARP interface */
-	if (!skb->dev->rfc2863) {
-		/* Check if we have CARP configured on this interface */
+	/* Check if received on a CARP interface (FreeBSD: if_carp == NULL) */
+	{
 		struct carp_softc *sc;
 		sc = sc_lookup_vhid(skb->dev, 0);
 		if (!sc) {

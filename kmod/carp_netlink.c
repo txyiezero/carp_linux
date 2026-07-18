@@ -4,7 +4,6 @@
 
 /* Forward declarations */
 static struct genl_family carp_genl_family;
-static struct nf_hook_ops *carp_nf_ops;
 
 /*
  * Join/leave CARP multicast groups.
@@ -200,7 +199,6 @@ EXPORT_SYMBOL(carp_get_vhid);
  * FreeBSD: carp_output() — replaces source MAC for all traffic from virtual IP
  * Linux: NF_INET_POST_ROUTING hook checks if source is CARP address
  */
-static struct nf_hook_ops *carp_nf_ops;
 
 		}
 	}

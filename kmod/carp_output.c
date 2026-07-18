@@ -36,7 +36,7 @@ void carp_send_ad_error(struct carp_softc *sc, int error)
  * FreeBSD: carp_send_ad_all() via taskqueue_swi
  * Runs in workqueue context, no locks held.
  */
-static void carp_sendall_work_func(struct work_struct *work)
+void carp_sendall_work_func(struct work_struct *work)
 {
 	struct carp_softc *sc;
 
@@ -263,7 +263,7 @@ static void carp_send_ad_v6(struct carp_softc *sc)
  */
 void carp_send_ad_locked(struct carp_softc *sc)
 {
-	struct timeval tv;
+	struct timespec64 tv;
 
 	/* Send IPv4 ad if we have IPv4 addresses */
 	if (sc->sc_naddrs > 0)
@@ -278,13 +278,13 @@ void carp_send_ad_locked(struct carp_softc *sc)
 	tv.tv_usec = sc->sc_advskew * 1000000 / 256;
 
 	mod_timer(&sc->sc_ad_timer,
-		  jiffies + tv.tv_sec * HZ + tv.tv_usec * HZ / 1000000);
+		  jiffies + timespec6_to_jiffies(&tv));
 }
 
 /*
  * Timer callback: send periodic advertisement.
  */
-static void carp_send_ad_timer(struct timer_list *t)
+void carp_send_ad_timer(struct timer_list *t)
 {
 	struct carp_softc *sc = from_timer(sc, t, sc_ad_timer);
 
@@ -309,7 +309,7 @@ static void carp_master_down_locked(struct carp_softc *sc, const char *reason)
 	carp_addroute(sc);
 }
 
-static void carp_master_down_timer(struct timer_list *t)
+void carp_master_down_timer(struct timer_list *t)
 {
 	struct carp_softc *sc = from_timer(sc, t, sc_md_timer);
 
@@ -317,7 +317,7 @@ static void carp_master_down_timer(struct timer_list *t)
 		carp_master_down_locked(sc, "master timed out");
 }
 
-static void carp_master_down6_timer(struct timer_list *t)
+void carp_master_down6_timer(struct timer_list *t)
 {
 	struct carp_softc *sc = from_timer(sc, t, sc_md6_timer);
 
@@ -330,7 +330,7 @@ static void carp_master_down6_timer(struct timer_list *t)
  */
 void carp_setrun(struct carp_softc *sc, int af)
 {
-	struct timeval tv;
+	struct timespec64 tv;
 
 	if (!netif_running(sc->sc_dev) ||
 	    !netif_carrier_ok(sc->sc_dev) ||
@@ -350,12 +350,10 @@ void carp_setrun(struct carp_softc *sc, int af)
 
 		if (af == AF_INET && sc->sc_naddrs > 0)
 			mod_timer(&sc->sc_md_timer,
-				  jiffies + tv.tv_sec * HZ +
-				  tv.tv_usec * HZ / 1000000);
+				  jiffies + timespec6_to_jiffies(&tv));
 		else if (af == AF_INET6 && sc->sc_naddrs6 > 0)
 			mod_timer(&sc->sc_md6_timer,
-				  jiffies + tv.tv_sec * HZ +
-				  tv.tv_usec * HZ / 1000000);
+				  jiffies + timespec6_to_jiffies(&tv));
 		else if (af == 0) {
 			if (sc->sc_naddrs > 0)
 				mod_timer(&sc->sc_md_timer,

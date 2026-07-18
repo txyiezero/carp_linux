@@ -1,6 +1,11 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
 #include "carp_internal.h"
+#include <linux/netdevice.h>
 #include <linux/igmp.h>
+#include <net/if_inet6.h>
+#include <linux/netfilter.h>
+#include <linux/netfilter_ipv4.h>
+#include <linux/netfilter_ipv6.h>
 
 /*
 
@@ -37,19 +42,17 @@ MODULE_PARM_DESC(carp_ifdown_adj, "Interface down demotion factor (default 240)"
 DEFINE_RWLOCK(carp_lock);
 LIST_HEAD(carp_if_list);
 int carp_demotion;
+struct nf_hook_ops *carp_nf_ops;
 struct work_struct carp_sendall_work;
 #define CARP_SENDAD_MAX_ERRORS  3
 #define CARP_SENDAD_MIN_SUCCESS 3
 #define CARP_MAXSKEW 240
-static DEFINE_SPINLOCK(carp_list_lock);
 
 /* Global statistics */
 struct carpstats __percpu *carp_stats;
 
 #define CARPSTATS_INC(name)	\
 	this_cpu_inc(carp_stats->name)
-#define DEMOTE_ADVSKEW(sc) \
-
 int carp_is_supported_dev(struct net_device *dev)
 {
 	if (!dev)
@@ -67,7 +70,7 @@ int carp_is_supported_dev(struct net_device *dev)
 }
 
 /* Lookup a carp_softc by VHID on a given device */
-static struct carp_softc *sc_lookup_vhid(struct net_device *dev, int vhid)
+struct carp_softc *sc_lookup_vhid(struct net_device *dev, int vhid)
 {
 	struct carp_if *cif;
 	struct carp_softc *sc;
@@ -87,15 +90,6 @@ static struct carp_softc *sc_lookup_vhid(struct net_device *dev, int vhid)
 	return NULL;
 }
 
-/* Find the best address for sending CARP advertisements */
-static struct net_device *carp_best_dev(int af, struct net_device *dev)
-{
-	/* Simply return the device - we use its primary address */
-	if (!dev)
-		return NULL;
-	return dev;
-}
-
 
 /*
  * Set CARP state and log the transition.
@@ -112,12 +106,17 @@ void carp_set_state(struct carp_softc *sc, int state, const char *reason)
 
 		/* Send uevent for monitoring */
 		{
-			char env[128];
-			snprintf(env, sizeof(env),
-				 "CARP_STATE=%s VHID=%d IFNAME=%s",
-				 states[state], sc->sc_vhid, sc->sc_dev->name);
+			char *envp[4];
+			char env_buf[3][64];
+			snprintf(env_buf[0], 64, "CARP_STATE=%s", states[state]);
+			snprintf(env_buf[1], 64, "VHID=%d", sc->sc_vhid);
+			snprintf(env_buf[2], 64, "IFNAME=%s", sc->sc_dev->name);
+			envp[0] = env_buf[0];
+			envp[1] = env_buf[1];
+			envp[2] = env_buf[2];
+			envp[3] = NULL;
 			kobject_uevent_env(&sc->sc_dev->dev.kobj,
-					   KOBJ_CHANGE, env);
+					   KOBJ_CHANGE, envp);
 		}
 	}
 }
@@ -186,7 +185,7 @@ static struct notifier_block carp_netdev_notifier = {
 /*
  * Allocate a new CARP interface.
  */
-static struct carp_if *carp_alloc_if(struct net_device *dev)
+struct carp_if *carp_alloc_if(struct net_device *dev)
 {
 	struct carp_if *cif;
 
@@ -228,7 +227,7 @@ void carp_free_if(struct carp_if *cif)
 /*
  * Allocate a new CARP softc for a VHID.
  */
-static struct carp_softc *carp_alloc(struct net_device *dev, int vhid)
+struct carp_softc *carp_alloc(struct net_device *dev, int vhid)
 {
 	struct carp_softc *sc;
 	struct carp_if *cif;
@@ -536,7 +535,18 @@ static int carp_stats_show(struct seq_file *m, void *v)
 
 	return 0;
 }
-DEFINE_SHOW_ATTRIBUTE(carp_stats);
+static int carp_stats_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, carp_stats_show, NULL);
+}
+
+static const struct proc_ops carp_stats_pops = {
+	.proc_open = carp_stats_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
 
 static struct proc_dir_entry *carp_proc_entry;
 
@@ -559,7 +569,17 @@ static int carp_ifaces_show(struct seq_file *m, void *v)
 
 	return 0;
 }
-DEFINE_SHOW_ATTRIBUTE(carp_ifaces);
+static int carp_ifaces_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, carp_ifaces_show, NULL);
+}
+
+static const struct proc_ops carp_ifaces_pops = {
+	.proc_open = carp_ifaces_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
 
 /*
  * Netlink Generic Family
@@ -570,6 +590,56 @@ static struct genl_family carp_genl_family;
 /*
  * Module init/exit
  */
+/*
+ * Netfilter hook: replace source MAC for CARP traffic.
+ * FreeBSD: carp_output() — checks all outgoing traffic on CARP interface
+ * Linux: NF_INET(6)_POST_ROUTING hook for both IPv4 and IPv6
+ */
+static unsigned int carp_nf_hook(void *priv, struct sk_buff *skb,
+				    const struct nf_hook_state *state)
+{
+	struct ethhdr *eth;
+	struct carp_softc *sc;
+	int i;
+
+	if (!skb_mac_header_was_set(skb))
+		return NF_ACCEPT;
+
+	eth = eth_hdr(skb);
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(sc, &carp_if_list, sc_global) {
+		if (sc->sc_dev != skb->dev || sc->sc_state != CARP_STATE_MASTER)
+			continue;
+
+		/* Check if source IP matches a CARP address */
+		if (skb->protocol == htons(ETH_P_IP)) {
+			struct iphdr *iph = ip_hdr(skb);
+			for (i = 0; i < sc->sc_naddrs; i++) {
+				if (sc->sc_ifas4[i] &&
+				    sc->sc_ifas4[i]->ifa_local == iph->saddr) {
+					memcpy(eth->h_source, sc->sc_lladdr, ETH_ALEN);
+					rcu_read_unlock();
+					return NF_ACCEPT;
+				}
+			}
+		} else if (skb->protocol == htons(ETH_P_IPV6)) {
+			struct ipv6hdr *ip6h = ipv6_hdr(skb);
+			for (i = 0; i < sc->sc_naddrs6; i++) {
+				if (sc->sc_ifas6[i] &&
+				    memcmp(&sc->sc_ifas6[i]->addr, &ip6h->saddr, 16) == 0) {
+					memcpy(eth->h_source, sc->sc_lladdr, ETH_ALEN);
+					rcu_read_unlock();
+					return NF_ACCEPT;
+				}
+			}
+		}
+	}
+	rcu_read_unlock();
+
+	return NF_ACCEPT;
+}
+
 static int __init carp_init(void)
 {
 	int ret;
@@ -609,25 +679,33 @@ static int __init carp_init(void)
 		pr_warn("Failed to create /proc/net/carp\n");
 		/* Non-fatal, continue */
 	} else {
-		proc_create("stats", 0444, carp_proc_entry, &carp_stats_fops);
-		proc_create("interfaces", 0444, carp_proc_entry, &carp_ifaces_fops);
+		proc_create("stats", 0444, carp_proc_entry, &carp_stats_pops);
+		proc_create("interfaces", 0444, carp_proc_entry, &carp_ifaces_pops);
 	}
 
-	/* Register netfilter hook for source MAC replacement */
+	/* Register netfilter hooks for source MAC replacement (IPv4 + IPv6) */
 	{
 		struct nf_hook_ops *ops;
-		ops = kmalloc(sizeof(*ops), GFP_KERNEL);
+		ops = kzalloc(sizeof(*ops) * 2, GFP_KERNEL);
 		if (ops) {
-			memset(ops, 0, sizeof(*ops));
-			ops->hook = carp_nf_hook;
-			ops->pf = NFPROTO_IPV4;
-			ops->hooknum = NF_INET_POST_ROUTING;
-			ops->priority = NF_IP_PRI_LAST;
-			if (nf_register_net_hook(&init_net, ops) == 0) {
+			/* IPv4 hook */
+			ops[0].hook = carp_nf_hook;
+			ops[0].pf = NFPROTO_IPV4;
+			ops[0].hooknum = NF_INET_POST_ROUTING;
+			ops[0].priority = NF_IP_PRI_FILTER;
+			/* IPv6 hook */
+			ops[1].hook = carp_nf_hook;
+			ops[1].pf = NFPROTO_IPV6;
+			ops[1].hooknum = NF_INET6_POST_ROUTING;
+			ops[1].priority = NF_IP6_PRI_FILTER;
+			if (nf_register_net_hook(&init_net, &ops[0]) == 0 &&
+			    nf_register_net_hook(&init_net, &ops[1]) == 0) {
 				carp_nf_ops = ops;
 			} else {
+				nf_unregister_net_hook(&init_net, &ops[0]);
+				nf_unregister_net_hook(&init_net, &ops[1]);
 				kfree(ops);
-				pr_warn("Failed to register netfilter hook\n");
+				pr_warn("Failed to register netfilter hooks\n");
 			}
 		}
 	}
@@ -671,7 +749,8 @@ static void __exit carp_exit(void)
 
 	/* Unregister netfilter hook */
 	if (carp_nf_ops) {
-		nf_unregister_net_hook(&init_net, carp_nf_ops);
+		nf_unregister_net_hook(&init_net, &carp_nf_ops[0]);
+		nf_unregister_net_hook(&init_net, &carp_nf_ops[1]);
 		kfree(carp_nf_ops);
 		carp_nf_ops = NULL;
 	}

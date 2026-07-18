@@ -19,11 +19,11 @@ This is a **full kernel-level implementation** of CARP for Linux, maintaining
 carp_linux/
 ├── kmod/              Kernel module sources
 │   ├── carp_internal.h   Internal header (structs, macros, declarations)
-│   ├── carp_main.c       Module init/exit, state machine, lifecycle
+│   ├── carp_main.c       Module init/exit, state machine, lifecycle, NF hook, /proc
 │   ├── carp_input.c      Packet reception, HMAC-SHA1, loop detection
-│   ├── carp_output.c     Advertisement sending, source MAC, NF hook
+│   ├── carp_output.c     Advertisement sending, source address selection
 │   ├── carp_route.c      Route management (IPv4/IPv6)
-│   ├── carp_netlink.c    Netlink interface, multicast, ARP/NDP hooks
+│   ├── carp_netlink.c    Netlink interface, multicast, ARP/NDP/bridge hooks
 │   └── Makefile          Kbuild Makefile
 ├── tools/             Userspace management
 │   ├── carpctl           CLI management tool (netlink-based)
@@ -35,7 +35,7 @@ carp_linux/
 │   └── Makefile
 ├── doc/
 │   ├── README.md         This file
-│   └── PORTABILITY.md    Portability analysis
+│   └── PORTABILITY.md    Portability analysis (FreeBSD ↔ Linux)
 ├── DKMS/
 │   └── dkms.conf         DKMS configuration
 ├── .github/workflows/
@@ -73,12 +73,12 @@ sudo modprobe carp
 sudo insmod carp.ko carp_allow=1 carp_preempt=0 carp_dscp=56
 
 # Module parameters:
-#   carp_allow      - Accept incoming CARP packets (0/1, default: 1)
-#   carp_preempt    - Preempt slower masters (0/1, default: 0)
-#   carp_log        - Log level (0/1/2, default: 1)
-#   carp_dscp       - DSCP for outgoing packets (0-63, default: 56)
-#   carp_senderr_adj - Send error demotion factor (default: 240)
-#   carp_ifdown_adj  - Interface down demotion factor (default: 240)
+#   carp_allow        - Accept incoming CARP packets (0/1, default: 1)
+#   carp_preempt      - Preempt slower masters (0/1, default: 0)
+#   carp_log          - Log level (0/1/2, default: 1)
+#   carp_dscp         - DSCP for outgoing packets (0-63, default: 56)
+#   carp_senderr_adj  - Send error demotion factor (default: 240)
+#   carp_ifdown_adj   - Interface down demotion factor (default: 240)
 ```
 
 ### Using carpctl
@@ -119,13 +119,13 @@ udevadm monitor | grep CARP
 
 ### Perfectly Ported (Same Behavior as FreeBSD)
 - CARP state machine (INIT → BACKUP → MASTER)
-- HMAC-SHA1 authentication
+- HMAC-SHA1 authentication (kernel crypto API)
 - Advertisement interval (advbase + advskew)
 - Master-down detection (3× advbase timeout)
 - Send error demotion (3 failures → demote, 3 successes → undemote)
 - Interface down demotion
 - Virtual MAC (00:00:5e:00:01:XX)
-- Source MAC replacement on outgoing traffic (NF hook)
+- Source MAC replacement on outgoing traffic (IPv4 + IPv6 NF hooks)
 - Loop detection (VHID=0 self-packet detection)
 - Route management (IPv4 + IPv6) on state change
 - Gratuitous ARP/NA on MASTER transition
@@ -135,8 +135,7 @@ udevadm monitor | grep CARP
 - Netlink configuration interface
 
 ### Ported With Different API (Same Behavior)
-- Protocol 112 registration (net_protocol vs ipproto_register)
-- Sysctl → module_param + /proc/net/carp/
+- Protocol 112 registration → raw socket / net_protocol
 - FreeBSD ioctl → Generic Netlink
 - VNET → global list + RCU
 - callout → timer_list
@@ -145,6 +144,8 @@ udevadm monitor | grep CARP
 - NET_EPOCH → RCU
 - ifpromisc → dev_set_promiscuity
 - ifa_ref → in_dev_hold
+- timeval → timespec64
+- if_output hook → NF_INET(6)_POST_ROUTING hook
 
 ## Compatibility
 
@@ -172,12 +173,12 @@ ifconfig eth0 vhid 1 advbase 1 pass sharedkey 192.168.1.100/24
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `carp_internal.h` | 158 | Shared header: structs, macros, declarations |
-| `carp_main.c` | 702 | Module init/exit, state machine, lifecycle, NF hook, /proc |
-| `carp_input.c` | 395 | HMAC-SHA1, packet reception, loop detection |
-| `carp_output.c` | 482 | Advertisement sending, demotion, source address selection |
+| `carp_internal.h` | 170 | Shared header: structs, macros, declarations |
+| `carp_main.c` | 775 | Module init/exit, state machine, lifecycle, NF hook, /proc |
+| `carp_input.c` | 396 | HMAC-SHA1, packet reception, loop detection |
+| `carp_output.c` | 480 | Advertisement sending, demotion, source address selection |
 | `carp_route.c` | 85 | IPv4/IPv6 route management |
-| `carp_netlink.c` | 392 | Netlink interface, multicast, ARP/NDP/bridge hooks |
+| `carp_netlink.c` | 390 | Netlink interface, multicast, ARP/NDP/bridge hooks |
 
 ## License
 
