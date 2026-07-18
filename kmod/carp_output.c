@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
+/*
+ * CARP advertisement sending, demotion, source address selection for Linux.
+ */
 #include "carp_internal.h"
 
 /* Forward declarations */
@@ -14,29 +17,31 @@ void carp_send_ad_error(struct carp_softc *sc, int error)
 	if (error) {
 		if (sc->sc_sendad_errors < INT_MAX)
 			sc->sc_sendad_errors++;
-		if (sc->sc_sendad_errors >= CARP_SENDAD_MAX_ERRORS)
-			pr_info("VHID %u@%s: send error %d, demoting\n",
-				sc->sc_vhid, sc->sc_dev->name, error);
+		if (sc->sc_sendad_errors >= CARP_SENDAD_MAX_ERRORS) {
+			char msg[64];
+			snprintf(msg, sizeof(msg), "send error %d on %s",
+				 error, sc->sc_dev->name);
+			carp_demote_adj(carp_senderr_adj, msg);
+		}
 		sc->sc_sendad_success = 0;
 	} else if (sc->sc_sendad_errors > 0) {
 		if (++sc->sc_sendad_success >= CARP_SENDAD_MIN_SUCCESS) {
-			if (sc->sc_sendad_errors >= CARP_SENDAD_MAX_ERRORS)
-				pr_info("VHID %u@%s: send ok, undemoting\n",
-					sc->sc_vhid, sc->sc_dev->name);
+			if (sc->sc_sendad_errors >= CARP_SENDAD_MAX_ERRORS) {
+				char msg[64];
+				snprintf(msg, sizeof(msg), "send ok on %s",
+					 sc->sc_dev->name);
+				carp_demote_adj(-carp_senderr_adj, msg);
+			}
 			sc->sc_sendad_errors = 0;
 		}
 	}
 }
 
 /*
- * Adjust global demotion factor and re-send all advertisements.
- */
-/*
  * Deferred work: re-send advertisements for all MASTER interfaces.
  * FreeBSD: carp_send_ad_all() via taskqueue_swi
- * Runs in workqueue context, no locks held.
  */
-void carp_sendall_work_func(struct work_struct *work)
+static void carp_sendall_work_func(struct work_struct *work)
 {
 	struct carp_softc *sc;
 
@@ -48,6 +53,9 @@ void carp_sendall_work_func(struct work_struct *work)
 	rcu_read_unlock();
 }
 
+/*
+ * Adjust global demotion factor and re-send all advertisements.
+ */
 void carp_demote_adj(int adj, const char *reason)
 {
 	carp_demotion += adj;
@@ -59,17 +67,15 @@ void carp_demote_adj(int adj, const char *reason)
 	pr_info("carp: demoted by %d to %d (%s)\n",
 		adj, carp_demotion, reason);
 
-	/* Schedule deferred re-send — avoids lock ordering issues */
+	/* Schedule deferred re-send */
 	schedule_work(&carp_sendall_work);
 }
 
-/* Supported interface types */
-
 /*
- * Prepare an advertisement packet for sending.
+ * Prepare advertisement header: set counter and compute HMAC.
  */
 void carp_prepare_ad(struct carp_softc *sc, struct carp_header *ch,
-			    u32 counter[2])
+		     u32 counter[2])
 {
 	if (sc->sc_init_counter) {
 		get_random_bytes(&sc->sc_counter, sizeof(sc->sc_counter));
@@ -88,7 +94,7 @@ void carp_prepare_ad(struct carp_softc *sc, struct carp_header *ch,
  */
 static void carp_send_ad_v4(struct carp_softc *sc)
 {
-	skb_buff *skb;
+	struct sk_buff *skb;
 	struct ethhdr *eth;
 	struct iphdr *iph;
 	struct carp_header *ch;
@@ -175,9 +181,9 @@ static void carp_send_ad_v4(struct carp_softc *sc)
 		ch->carp_cksum = csum_fold(csum);
 	}
 
-	CARPSTATS_INC(carp_opackets);
+	CARPSTATS_INC(carps_opackets);
 
-	/* Send directly via dev_queue_xmit (bypass ip_local_out) */
+	/* Send directly via dev_queue_xmit */
 	carp_send_ad_error(sc, dev_queue_xmit(skb));
 }
 
@@ -186,7 +192,7 @@ static void carp_send_ad_v4(struct carp_softc *sc)
  */
 static void carp_send_ad_v6(struct carp_softc *sc)
 {
-	skb_buff *skb;
+	struct sk_buff *skb;
 	struct ethhdr *eth;
 	struct ipv6hdr *ip6h;
 	struct carp_header *ch;
@@ -227,7 +233,7 @@ static void carp_send_ad_v6(struct carp_softc *sc)
 	ip6h->nexthdr = IPPROTO_CARP;
 	ip6h->hop_limit = CARP_DFLTTL;
 
-	/* Set source address */
+	/* Set source address from best local address */
 	{
 		struct inet6_ifaddr *best6 = carp_best_ifa6(sc->sc_dev);
 		if (best6) {
@@ -262,7 +268,7 @@ static void carp_send_ad_v6(struct carp_softc *sc)
 
 	CARPSTATS_INC(carps_opackets6);
 
-	/* Send directly */
+	/* Send directly via dev_queue_xmit */
 	carp_send_ad_error(sc, dev_queue_xmit(skb));
 }
 
@@ -283,16 +289,14 @@ void carp_send_ad_locked(struct carp_softc *sc)
 
 	/* Schedule next advertisement */
 	tv.tv_sec = sc->sc_advbase;
-	tv.tv_nsec = (long)sc->sc_advskew * 1000000000L / 256;
+	tv.tv_nsec = (long)DEMOTE_ADVSKEW(sc) * 1000000000L / 256;
 
 	mod_timer(&sc->sc_ad_timer,
 		  jiffies + timespec64_to_jiffies(&tv));
 }
 
-/*
- * Timer callback: send periodic advertisement.
- */
-void carp_send_ad_timer(struct timer_list *t)
+/* Timer callback: send periodic advertisement. */
+static void carp_send_ad_timer(struct timer_list *t)
 {
 	struct carp_softc *sc = from_timer(sc, t, sc_ad_timer);
 
@@ -300,23 +304,28 @@ void carp_send_ad_timer(struct timer_list *t)
 }
 
 /*
- * Master down timeout - promote to MASTER.
+ * Master down: promote to MASTER.
  */
 static void carp_master_down_locked(struct carp_softc *sc, const char *reason)
 {
-	if (sc->sc_state != CARP_STATE_BACKUP)
-		return;
-
-	carp_set_state(sc, CARP_STATE_MASTER, reason);
-	carp_send_ad_locked(sc);
-	if (sc->sc_naddrs > 0)
-		carp_send_arp(sc);
-	if (sc->sc_naddrs6 > 0)
-		carp_send_na(sc);
-	carp_setrun(sc, 0);
+	switch (sc->sc_state) {
+	case CARP_STATE_BACKUP:
+		carp_set_state(sc, CARP_STATE_MASTER, reason);
+		carp_send_ad_locked(sc);
+		if (sc->sc_naddrs > 0)
+			carp_send_arp(sc);
+		if (sc->sc_naddrs6 > 0)
+			carp_send_na(sc);
+		carp_setrun(sc, 0);
+		carp_addroute(sc);
+		break;
+	case CARP_STATE_INIT:
+	case CARP_STATE_MASTER:
+		break;
+	}
 }
 
-void carp_master_down_timer(struct timer_list *t)
+static void carp_master_down_timer(struct timer_list *t)
 {
 	struct carp_softc *sc = from_timer(sc, t, sc_md_timer);
 
@@ -324,7 +333,7 @@ void carp_master_down_timer(struct timer_list *t)
 		carp_master_down_locked(sc, "master timed out");
 }
 
-void carp_master_down6_timer(struct timer_list *t)
+static void carp_master_down6_timer(struct timer_list *t)
 {
 	struct carp_softc *sc = from_timer(sc, t, sc_md6_timer);
 
@@ -379,9 +388,6 @@ void carp_setrun(struct carp_softc *sc, int af)
 	}
 }
 
-	}
-}
-
 /*
  * Send gratuitous ARP when becoming MASTER.
  */
@@ -394,10 +400,10 @@ void carp_send_arp(struct carp_softc *sc)
 			continue;
 		arp_send(ARPOP_REPLY, ETH_P_ARP,
 			 sc->sc_ifas4[i]->ifa_local,
-			 sc->sc_dev, /* target */
-			 sc->sc_ifas4[i]->ifa_local,  /* source = target */
-			 sc->sc_lladdr,                /* src_hw = virtual MAC */
-			 NULL,                          /* dest_hw = broadcast */
+			 sc->sc_dev,
+			 sc->sc_ifas4[i]->ifa_local,
+			 sc->sc_lladdr,
+			 NULL,
 			 NULL);
 	}
 }
@@ -413,22 +419,16 @@ void carp_send_na(struct carp_softc *sc)
 		if (!sc->sc_ifas6[i])
 			continue;
 		ndisc_send_na(sc->sc_dev, &in6addr_any,
-			      &sc->sc_ifas6[i]->ifra_addr.sin6_addr,
+			      &sc->sc_ifas6[i]->addr,
 			      false,  /* router */
 			      false,  /* solicited */
 			      true,   /* override */
-			      true);  // inc_opt (include LL addr option)
+			      true);  /* inc_opt */
 	}
 }
 
 /*
- * Add routes when becoming MASTER.
- */
-
-/*
- * Find the best local address of the given family on an interface.
- * Equivalent to FreeBSD carp_best_ifa(): iterates addresses and
- * picks the preferred one.
+ * Find the best IPv4 address on an interface.
  */
 struct in_ifaddr *carp_best_ifa4(struct net_device *dev)
 {
@@ -439,12 +439,11 @@ struct in_ifaddr *carp_best_ifa4(struct net_device *dev)
 	if (!in_dev)
 		return NULL;
 
-	for_each_ifa_rcu(in_dev, ifa) {
+	in_dev_for_each_ifa_rcu(ifa, in_dev) {
 		if (ifa->ifa_local == 0)
 			continue;
 		if (!best)
 			best = ifa;
-		/* Prefer primary address (ifa_flags & IFA_F_PERMANENT) */
 		else if ((ifa->ifa_flags & IFA_F_PERMANENT) &&
 			 !(best->ifa_flags & IFA_F_PERMANENT))
 			best = ifa;
@@ -455,6 +454,9 @@ struct in_ifaddr *carp_best_ifa4(struct net_device *dev)
 	return best;
 }
 
+/*
+ * Find the best IPv6 address on an interface.
+ */
 struct inet6_ifaddr *carp_best_ifa6(struct net_device *dev)
 {
 	struct inet6_dev *idev;
@@ -464,12 +466,11 @@ struct inet6_ifaddr *carp_best_ifa6(struct net_device *dev)
 	if (!idev)
 		return NULL;
 
-	list_for_each_entry_rcu(ifa6, &idev->if_list, if_list) {
+	list_for_each_entry_rcu(ifa6, &idev->addr_list, if_list) {
 		if (ipv6_addr_any(&ifa6->addr))
 			continue;
 		if (!best)
 			best = ifa6;
-		/* Prefer permanent (static) addresses over temporary */
 		else if ((ifa6->flags & IFA_F_PERMANENT) &&
 			 !(best->flags & IFA_F_PERMANENT))
 			best = ifa6;
@@ -479,6 +480,3 @@ struct inet6_ifaddr *carp_best_ifa6(struct net_device *dev)
 		in6_dev_hold(best->idev);
 	return best;
 }
-
-
-

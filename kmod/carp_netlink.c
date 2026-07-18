@@ -1,4 +1,8 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
+/*
+ * CARP netlink interface and hook functions for Linux.
+ * Handles: multicast management, ARP/NDP/bridge hooks, netlink config.
+ */
 #include "carp_internal.h"
 
 /* Forward declarations */
@@ -193,21 +197,6 @@ int carp_get_vhid(struct net_device *dev, __be32 addr)
 }
 EXPORT_SYMBOL(carp_get_vhid);
 
-/*
- * Netfilter hook for regular traffic source MAC replacement.
- * FreeBSD: carp_output() — replaces source MAC for all traffic from virtual IP
- * Linux: NF_INET_POST_ROUTING hook checks if source is CARP address
- */
-
-		}
-	}
-	rcu_read_unlock();
-
-	return NF_ACCEPT;
-}
-
-static struct genl_family carp_genl_family;
-
 /* Netlink GET handler */
 static int carp_nl_get(struct sk_buff *skb, struct genl_info *info)
 {
@@ -321,7 +310,7 @@ static int carp_nl_set(struct sk_buff *skb, struct genl_info *info)
 		if (key_len > 0 && key_len <= CARP_KEY_LEN) {
 			memcpy(sc->sc_key, nla_data(info->attrs[CARP_NL_KEY]),
 			       key_len);
-			}
+		}
 	}
 
 	if (info->attrs[CARP_NL_ADDR])
@@ -381,7 +370,3 @@ static struct genl_family carp_genl_family = {
 	.ops = carp_nl_ops,
 	.n_ops = ARRAY_SIZE(carp_nl_ops),
 };
-
-/*
- * Module init/exit
- */
