@@ -24,13 +24,13 @@ jobs:
           make module KDIR=$KDIR
 
       - name: Build userspace tool
-        run: make userspace
+        run: make tools
 
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          cp carp.ko artifacts/
-          cp carp_config artifacts/
+          cp kmod/carp.ko artifacts/
+          cp tools/carpctl artifacts/
           ls -la artifacts/
 
       - name: Upload artifacts
