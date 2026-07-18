@@ -30,7 +30,7 @@ jobs:
         run: |
           mkdir -p artifacts
           cp kmod/carp.ko artifacts/
-          cp tools/carpctl artifacts/
+          cp tools/carpd artifacts/
           ls -la artifacts/
 
       - name: Upload artifacts
