@@ -195,7 +195,7 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 	if (af == AF_INET)
 		multicast = IN_MULTICAST(ntohl(sc->sc_carpaddr.s_addr));
 	else
-		multicast = IN6_IS_ADDR_MULTICAST(&sc->sc_carpaddr6);
+		multicast = ipv6_addr_is_multicast(&sc->sc_carpaddr6);
 
 	if (multicast && ttl != CARP_DFLTTL) {
 		CARPSTATS_INC(carps_badttl);
@@ -234,18 +234,17 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 		break;
 	case CARP_STATE_MASTER:
 		/* If we receive a more frequent advertisement, go to BACKUP */
-		if (timespec6_compare(&sc_tv, &ch_tv) > 0 ||
-		    timespec6_compare(&sc_tv, &ch_tv) == 0) {
+		if (timespec64_compare(&sc_tv, &ch_tv) > 0 ||
+		    timespec64_compare(&sc_tv, &ch_tv) == 0) {
 			del_timer_sync(&sc->sc_ad_timer);
 			carp_set_state(sc, CARP_STATE_BACKUP,
 				       "more frequent advertisement received");
 			carp_setrun(sc, 0);
-			carp_delroute(sc);
 		}
 		break;
 	case CARP_STATE_BACKUP:
 		/* Preemption: if we advertise faster, treat slow master as down */
-		if (carp_preempt && timespec6_compare(&sc_tv, &ch_tv) < 0) {
+		if (carp_preempt && timespec64_compare(&sc_tv, &ch_tv) < 0) {
 			if (carp_log > 1)
 				pr_info("VHID %u@%s: preempting slower master\n",
 					sc->sc_vhid, dev->name);
@@ -257,7 +256,6 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 			if (af == AF_INET6)
 				carp_send_na(sc);
 			carp_setrun(sc, 0);
-			carp_addroute(sc);
 			break;
 		}
 
@@ -265,7 +263,7 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 		struct timespec64 timeout_tv;
 		timeout_tv.tv_sec = sc->sc_advbase * 3;
 		timeout_tv.tv_nsec = 0;
-		if (timespec6_compare(&timeout_tv, &ch_tv) < 0) {
+		if (timespec64_compare(&timeout_tv, &ch_tv) < 0) {
 			if (carp_log > 1)
 				pr_info("VHID %u@%s: master will time out\n",
 					sc->sc_vhid, dev->name);
@@ -277,7 +275,6 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 			if (af == AF_INET6)
 				carp_send_na(sc);
 			carp_setrun(sc, 0);
-			carp_addroute(sc);
 			break;
 		}
 
@@ -295,7 +292,7 @@ out:
  * IPv4 CARP input handler.
  * Called from raw socket or protocol handler registration.
  */
-static int carp_input4(struct sk_buff *skb)
+int carp_input4(struct sk_buff *skb)
 {
 	struct iphdr *iph;
 	struct carp_header *ch;
@@ -341,7 +338,7 @@ static int carp_input4(struct sk_buff *skb)
 /*
  * IPv6 CARP input handler.
  */
-static int carp_input6(struct sk_buff *skb)
+int carp_input6(struct sk_buff *skb)
 {
 	struct ipv6hdr *ip6h;
 	struct carp_header *ch;

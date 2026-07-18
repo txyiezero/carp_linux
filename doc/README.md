@@ -13,20 +13,61 @@ addresses are always available, providing host-level redundancy.
 This is a **full kernel-level implementation** of CARP for Linux, maintaining
 **wire-level compatibility** with FreeBSD and OpenBSD CARP implementations.
 
-## Architecture
+## Module Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    内核模块 (kmod/)                   │
+│                                                       │
+│  carp_netdev.c  ─ 网络栈集成                          │
+│  ├─ 协议 112 注册 (IPv4 + IPv6)                      │
+│  ├─ NF hook (源 MAC 替换)                             │
+│  └─ 设备事件通知 (netdev notifier)                    │
+│                                                       │
+│  carp_input.c   ─ 收包处理                            │
+│  ├─ HMAC-SHA1 认证                                    │
+│  ├─ 状态机 (INIT→BACKUP→MASTER)                      │
+│  └─ 环路检测                                          │
+│                                                       │
+│  carp_output.c  ─ 发包处理                            │
+│  ├─ 广告构建 + 发送                                   │
+│  ├─ 降级管理                                          │
+│  └─ 源地址选择                                        │
+│                                                       │
+│  carp_netlink.c ─ 用户态接口                          │
+│  ├─ Generic Netlink (配置)                            │
+│  ├─ 多播组管理                                        │
+│  └─ ARP/NDP/桥接 hook (EXPORT_SYMBOL)                │
+│                                                       │
+│  carp_main.c    ─ 模块生命周期                        │
+│  ├─ 状态机 (set_state, sc_state)                     │
+│  ├─ 接口生命周期 (alloc/destroy)                      │
+│  ├─ 地址管理 (attach/detach)                          │
+│  └─ /proc 接口                                       │
+│                                                       │
+│  路由/IP管理: 委托给用户态 (carpd daemon)             │
+│  内核 → uevent → carpd → ip addr add/del              │
+└─────────────────────────────────────────────────────┘
+```
+
+## Features
 
 ```
 carp_linux/
 ├── kmod/              Kernel module sources
 │   ├── carp_internal.h   Internal header (structs, macros, declarations)
-│   ├── carp_main.c       Module init/exit, state machine, lifecycle, NF hook, /proc
+│   ├── carp_main.c       Module init/exit, state machine, lifecycle
 │   ├── carp_input.c      Packet reception, HMAC-SHA1, loop detection
 │   ├── carp_output.c     Advertisement sending, source address selection
-│   ├── carp_route.c      Route management (IPv4/IPv6)
 │   ├── carp_netlink.c    Netlink interface, multicast, ARP/NDP/bridge hooks
+│   ├── carp_netdev.c     Network stack integration: NF hook, protocol 112, device events
 │   └── Makefile          Kbuild Makefile
 ├── tools/             Userspace management
-│   ├── carpctl           CLI management tool (netlink-based)
+│   ├── carpd.h         Public header (includes include/carp.h)
+│   ├── carpd.c         Main entry point (CLI parsing)
+│   ├── carpd_netlink.c Netlink communication + VIP query
+│   ├── carpd_cmd.c     CLI commands (add/del/set/status)
+│   ├── carpd_daemon.c  Daemon mode (uevent + address mgmt)
 │   └── Makefile
 ├── include/           Shared headers
 │   └── carp.h            UAPI header (kernel ↔ userspace)
@@ -38,6 +79,8 @@ carp_linux/
 │   └── PORTABILITY.md    Portability analysis (FreeBSD ↔ Linux)
 ├── DKMS/
 │   └── dkms.conf         DKMS configuration
+├── .github/workflows/
+│   └── build.yml         CI build pipeline
 ├── .github/workflows/
 │   └── build.yml         CI build pipeline
 └── Makefile               Top-level build
@@ -81,25 +124,28 @@ sudo insmod carp.ko carp_allow=1 carp_preempt=0 carp_dscp=56
 #   carp_ifdown_adj   - Interface down demotion factor (default: 240)
 ```
 
-### Using carpctl
+### Using carpd
 
 ```bash
 # Add a CARP VHID
-sudo carpctl add eth0 1
+sudo carpd add eth0 1
 
 # Add with options
-sudo carpctl add eth0 1 --advbase 1 --advskew 0 --password mysecret
+sudo carpd add eth0 1 --advbase 1 --advskew 0 --password mysecret
 
 # Set state
-sudo carpctl set eth0 1 --state MASTER
+sudo carpd set eth0 1 --state MASTER
 
 # Check status
-sudo carpctl status
-sudo carpctl status eth0
-sudo carpctl status eth0 1
+sudo carpd status
+sudo carpd status eth0
+sudo carpd status eth0 1
 
 # Delete
-sudo carpctl del eth0 1
+sudo carpd del eth0 1
+
+# Start daemon (monitors state changes, manages addresses)
+sudo carpd daemon
 ```
 
 ### Monitoring
@@ -111,8 +157,9 @@ cat /proc/net/carp/stats
 # View interfaces
 cat /proc/net/carp/interfaces
 
-# Watch for state changes
-udevadm monitor | grep CARP
+# The carpd daemon automatically manages virtual IP addresses
+# when CARP state changes (MASTER → add VIP, BACKUP/INIT → remove VIP)
+sudo carpd daemon
 ```
 
 ## Features
@@ -127,15 +174,15 @@ udevadm monitor | grep CARP
 - Virtual MAC (00:00:5e:00:01:XX)
 - Source MAC replacement on outgoing traffic (IPv4 + IPv6 NF hooks)
 - Loop detection (VHID=0 self-packet detection)
-- Route management (IPv4 + IPv6) on state change
+- Route management delegated to userspace (carpd daemon) via uevent notification
 - Gratuitous ARP/NA on MASTER transition
 - Multicast group management (224.0.0.18 / ff02::12)
 - ARP/NDP address matching hooks (EXPORT_SYMBOL)
 - Bridge MAC matching (carp_forus)
-- Netlink configuration interface
+- Netlink configuration interface + /proc/net/carp/ stats
 
 ### Ported With Different API (Same Behavior)
-- Protocol 112 registration → raw socket / net_protocol
+- Protocol 112 registration → inet_add_protocol (kernel handler)
 - FreeBSD ioctl → Generic Netlink
 - VNET → global list + RCU
 - callout → timer_list
@@ -144,7 +191,7 @@ udevadm monitor | grep CARP
 - NET_EPOCH → RCU
 - ifpromisc → dev_set_promiscuity
 - ifa_ref → in_dev_hold
-- timeval → timespec64
+- timeval → timespec64 (timespec64_to_jiffies, timespec64_compare)
 - if_output hook → NF_INET(6)_POST_ROUTING hook
 
 ## Compatibility
@@ -163,22 +210,40 @@ udevadm monitor | grep CARP
 ```bash
 # Linux side
 sudo modprobe carp
-sudo carpctl add eth0 1 --advbase 1 --password sharedkey
+sudo carpd add eth0 1 --advbase 1 --password sharedkey
 
 # FreeBSD side
 ifconfig eth0 vhid 1 advbase 1 pass sharedkey 192.168.1.100/24
 ```
 
-## Module Source Files
+## Source Files
+
+### Kernel Module (`kmod/`)
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `carp_internal.h` | 170 | Shared header: structs, macros, declarations |
-| `carp_main.c` | 775 | Module init/exit, state machine, lifecycle, NF hook, /proc |
-| `carp_input.c` | 396 | HMAC-SHA1, packet reception, loop detection |
-| `carp_output.c` | 480 | Advertisement sending, demotion, source address selection |
-| `carp_route.c` | 85 | IPv4/IPv6 route management |
-| `carp_netlink.c` | 390 | Netlink interface, multicast, ARP/NDP/bridge hooks |
+| `carp_internal.h` | 171 | Internal header: structs, macros, declarations |
+| `carp_main.c` | 633 | Module init/exit, state machine, lifecycle |
+| `carp_input.c` | 393 | HMAC-SHA1, packet reception, loop detection |
+| `carp_output.c` | 484 | Advertisement sending, demotion, source address selection |
+| `carp_netlink.c` | 388 | Netlink interface, multicast, ARP/NDP/bridge hooks |
+| `carp_netdev.c` | 189 | Network stack integration: NF hook, protocol 112, device events |
+
+### Userspace Tool (`tools/`)
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `carpd.h` | 66 | Public header (includes include/carp.h) |
+| `carpd.c` | 166 | Main entry point (CLI parsing, command dispatch) |
+| `carpd_netlink.c` | 158 | Netlink communication + VIP query |
+| `carpd_cmd.c` | 234 | CLI commands (add/del/set/status) |
+| `carpd_daemon.c` | 144 | Daemon mode (uevent monitoring + address management) |
+
+### Shared Header (`include/`)
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `carp.h` | 93 | UAPI header: CARP protocol definitions (kernel ↔ userspace) |
 
 ## License
 

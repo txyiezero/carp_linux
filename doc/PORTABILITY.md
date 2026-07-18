@@ -53,17 +53,17 @@
 | # | Feature | FreeBSD | Linux |
 |---|---------|---------|-------|
 | 23 | State Transition Logging | `carp_set_state` | `carp_set_state` |
-| 24 | State Change Notification | `devctl_notify` | `kobject_uevent_env` (char **envp) |
+| 24 | State Change Notification | `devctl_notify` | `kobject_uevent_env` → carpd daemon manages addresses |
 | 25 | Interface State Handling | `carp_sc_state` | `carp_sc_state` |
 | 26 | Link State Notification | `carp_linkstate` | `carp_device_event` (netdev notifier) |
 
 ### Routing (4)
 | # | Feature | FreeBSD | Linux |
 |---|---------|---------|-------|
-| 27 | IPv4 Route Addition | `carp_ifa_addroute` | `carp_addroute` (ip_fib_configure) |
-| 28 | IPv4 Route Deletion | `carp_ifa_delroute` | `carp_delroute` |
-| 29 | IPv6 Route Addition | `carp_ifa_addroute` | `carp_addroute` (ip6_route_add) |
-| 30 | IPv6 Route Deletion | `carp_ifa_delroute` | `carp_delroute` (ip6_route_del) |
+| 27 | IPv4 Route Addition | `carp_ifa_addroute` | Delegated to userspace (carpd daemon) via uevent |
+| 28 | IPv4 Route Deletion | `carp_ifa_delroute` | Delegated to userspace (carpd daemon) via uevent |
+| 29 | IPv6 Route Addition | `carp_ifa_addroute` | Delegated to userspace (carpd daemon) via uevent |
+| 30 | IPv6 Route Deletion | `carp_ifa_delroute` | Delegated to userspace (carpd daemon) via uevent |
 
 ### ARP/NDP (8)
 | # | Feature | FreeBSD | Linux |
@@ -83,7 +83,7 @@
 | 39 | Multicast Group Join/Leave | `carp_multicast_setup/cleanup` | `dev_mc_add/del` |
 | 40 | Interface Type Check | `carp_is_supported_if` | `carp_is_supported_dev` |
 | 41 | Unicast Peer Mode | `peer`/`peer6` in `carp_ioctl_set` | `--addr`/`--addr6` in `carp_nl_set` |
-| 42 | CARP Statistics Counters | `VNET_PCPUSTAT` | per-CPU `carpstats` via /proc |
+| 42 | CARP Statistics Counters | `VNET_PCPUSTAT` | per-CPU `carpstats` via `/proc/net/carp/stats` |
 | 43 | Sysctl Parameters | `SYSCTL_INT` / `SYSCTL_PROC` | `module_param` + `/proc/net/carp/` |
 
 ### Configuration (12)
@@ -124,7 +124,7 @@
 | 14 | Interface Address Lookup | `CK_STAILQ_FOREACH` | `rcu_read_lock` + list traversal | Different synchronization |
 | 15 | Hook Registration | Function pointer (`carp_output_p`, etc.) | `EXPORT_SYMBOL` + netfilter | FreeBSD uses pluggable function pointers |
 | 16 | RCU / Epoch | `NET_EPOCH_ENTER/EXIT` | `rcu_read_lock/rcu_read_unlock` | Different epoch-based reclamation |
-| 17 | Timekeeping | `struct timeval` + `timevalcmp` | `struct timespec64` + `timespec6_compare` | Kernel deprecated timeval in 6.x |
+| 17 | Timekeeping | `struct timeval` + `timevalcmp` | `struct timespec64` + `timespec64_compare` | Kernel deprecated timeval in 6.x |
 
 ---
 
@@ -147,15 +147,19 @@ Cross-platform failover works: FreeBSD MASTER ↔ Linux BACKUP.
 
 | FreeBSD File | Linux File | Lines |
 |-------------|-----------|-------|
-| `sys/netinet/ip_carp.c` (2605 lines) | `kmod/carp_internal.h` | 170 |
-| | `kmod/carp_main.c` | 775 |
-| | `kmod/carp_input.c` | 396 |
-| | `kmod/carp_output.c` | 480 |
-| | `kmod/carp_route.c` | 85 |
-| | `kmod/carp_netlink.c` | 390 |
-| `sys/netinet/ip_carp.h` (178 lines) | `include/carp.h` | 89 |
-| `sbin/ifconfig/carp.c` (252 lines) | `tools/carpctl.c` | 556 |
-| `lib/libifconfig/libifconfig_carp.c` (213 lines) | Integrated into `carpctl.c` | — |
+| `sys/netinet/ip_carp.c` (2605 lines) | `kmod/carp_internal.h` | 171 |
+| | `kmod/carp_main.c` | 633 |
+| | `kmod/carp_input.c` | 393 |
+| | `kmod/carp_output.c` | 484 |
+| | `kmod/carp_netlink.c` | 388 |
+| | `kmod/carp_netdev.c` | 189 |
+| `sys/netinet/ip_carp.h` (178 lines) | `include/carp.h` | 93 |
+| `sbin/ifconfig/carp.c` (252 lines) | `tools/carpd.c` | 166 |
+| | `tools/carpd.h` | 66 |
+| | `tools/carpd_netlink.c` | 158 |
+| | `tools/carpd_cmd.c` | 234 |
+| | `tools/carpd_daemon.c` | 144 |
+| `lib/libifconfig/libifconfig_carp.c` (213 lines) | Integrated into `tools/carpd_netlink.c` | — |
 | `sys/crypto/sha1.c` (268 lines) | Linux `crypto/sha1` (kernel API) | — |
 | `tests/sys/netinet/carp.sh` (491 lines) | `tests/carp_basic.sh` | 159 |
 
@@ -163,9 +167,46 @@ Cross-platform failover works: FreeBSD MASTER ↔ Linux BACKUP.
 
 ## Kernel Dependencies
 
-- `crypto/sha1` — HMAC-SHA1
-- `net/ipv4` — IPv4 stack, routing, ARP
-- `net/ipv6` — IPv6 stack, NDP
-- `net/genetlink` — Generic Netlink interface
-- `net/netfilter` — NF_INET(6)_POST_ROUTING hooks (source MAC replacement)
-- `net/if_inet6.h` — IPv6 interface address structures
+### Core
+- `linux/module.h` — Module init/exit, parameters
+- `linux/kernel.h` — Core kernel functions
+- `linux/slab.h` — Memory allocation (kzalloc, kfree)
+- `linux/string.h` — String functions (memset, memcpy, memcmp)
+- `linux/timer.h` — Timer subsystem (timer_list, mod_timer)
+- `linux/spinlock.h` — Spin locks
+- `linux/rwlock.h` — Read-write locks
+- `linux/workqueue.h` — Deferred work (schedule_work)
+- `linux/proc_fs.h` — /proc filesystem interface
+- `linux/seq_file.h` — Sequential file operations (single_open)
+- `linux/hashtable.h` — Hash table macros
+
+### Networking
+- `linux/skbuff.h` — Socket buffer (sk_buff)
+- `linux/netdevice.h` — Network device (net_device, netif_running, netif_carrier_ok)
+- `linux/inetdevice.h` — IPv4 device config (in_ifaddr, in_dev_hold)
+- `linux/if_arp.h` — ARP definitions (ARPOP_REPLY, ETH_P_ARP)
+- `linux/if_ether.h` — Ethernet definitions (ETH_P_IP, ETH_P_IPV6, ETH_ALEN)
+- `linux/ip.h` — IPv4 header (struct iphdr)
+- `linux/ipv6.h` — IPv6 header (struct ipv6hdr)
+- `linux/in.h` — Address family, IPPROTO_CARP
+- `net/ip.h` — IPv4 output (ip_fast_csum, ip_local_out)
+- `net/route.h` — IPv4 routing (fib_new_table)
+- `net/arp.h` — ARP output (arp_send)
+- `net/ipv6.h` — IPv6 utilities (ipv6_addr_is_multicast, ipv6_addr_any)
+- `net/ip6_checksum.h` — IPv6 checksum (csum_ipv6_magic)
+- `net/ip6_route.h` — IPv6 routing
+- `net/ndisc.h` — Neighbor Discovery (ndisc_send_na)
+- `net/addrconf.h` — IPv6 address config (inet6_ifaddr, in6_dev_hold)
+- `net/if_inet6.h` — IPv6 interface addresses
+- `net/genetlink.h` — Generic Netlink interface
+
+### Crypto
+- `crypto/hash.h` — SHA-1 HMAC (crypto_shash API)
+
+### Netfilter
+- `linux/netfilter.h` — Netfilter framework (nf_hook_ops, nf_register_net_hook, NF_INET_POST_ROUTING)
+- `linux/netfilter_ipv4.h` — IPv4 filter priority (NF_IP_PRI_FILTER)
+- `linux/netfilter_ipv6.h` — IPv6 filter priority (NF_IP6_PRI_FILTER)
+
+### Project Header
+- `include/carp.h` — CARP protocol definitions (UAPI, shared with userspace)

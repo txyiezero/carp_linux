@@ -186,13 +186,16 @@ static void carp_send_ad_v4(struct carp_softc *sc)
  */
 static void carp_send_ad_v6(struct carp_softc *sc)
 {
-	struct sk_buff *skb;
+	skb_buff *skb;
+	struct ethhdr *eth;
 	struct ipv6hdr *ip6h;
 	struct carp_header *ch;
-	int len;
+	int total_len;
 
-	len = sizeof(struct ipv6hdr) + sizeof(struct carp_header);
-	skb = alloc_skb(LL_RESERVED_SPACE(sc->sc_dev) + len, GFP_ATOMIC);
+	/* Total: Ethernet + IPv6 + CARP */
+	total_len = ETH_HLEN + sizeof(struct ipv6hdr) + sizeof(struct carp_header);
+
+	skb = alloc_skb(total_len + LL_RESERVED_SPACE(sc->sc_dev), GFP_ATOMIC);
 	if (!skb) {
 		CARPSTATS_INC(carps_onomem);
 		return;
@@ -202,7 +205,16 @@ static void carp_send_ad_v6(struct carp_softc *sc)
 	skb->dev = sc->sc_dev;
 	skb->protocol = htons(ETH_P_IPV6);
 	skb->pkt_type = PACKET_HOST;
-	skb->ip_summed = CHECKSUM_UNNECESSARY;
+	skb->ip_summed = CHECKSUM_NONE;
+
+	/* Push Ethernet header with virtual MAC as source */
+	skb_push(skb, ETH_HLEN);
+	skb_reset_mac_header(skb);
+	eth = eth_hdr(skb);
+	eth->h_proto = htons(ETH_P_IPV6);
+	memcpy(eth->h_dest, sc->sc_lladdr, ETH_ALEN);
+	eth->h_dest[5] = 0x12;
+	memcpy(eth->h_source, sc->sc_lladdr, ETH_ALEN);
 
 	/* Push IPv6 header */
 	skb_push(skb, sizeof(struct ipv6hdr));
@@ -215,9 +227,9 @@ static void carp_send_ad_v6(struct carp_softc *sc)
 	ip6h->nexthdr = IPPROTO_CARP;
 	ip6h->hop_limit = CARP_DFLTTL;
 
-	/* Set source address from best local address */
+	/* Set source address */
 	{
-		struct in6_ifaddr *best6 = carp_best_ifa6(sc->sc_dev);
+		struct inet6_ifaddr *best6 = carp_best_ifa6(sc->sc_dev);
 		if (best6) {
 			ip6h->saddr = best6->addr;
 			in6_dev_put(best6->idev);
@@ -243,9 +255,6 @@ static void carp_send_ad_v6(struct carp_softc *sc)
 
 	carp_prepare_ad(sc, ch, ch->carp_counter);
 
-	/* Set up for checksum */
-	skb->transport_header = skb->network_header + sizeof(struct ipv6hdr);
-
 	/* Compute checksum */
 	ch->carp_cksum = csum_ipv6_magic(&ip6h->saddr, &ip6h->daddr,
 					 sizeof(struct carp_header),
@@ -253,9 +262,8 @@ static void carp_send_ad_v6(struct carp_softc *sc)
 
 	CARPSTATS_INC(carps_opackets6);
 
-	skb_dst_set(skb, NULL);
-	skb->protocol = htons(ETH_P_IPV6);
-	carp_send_ad_error(sc, ip6_local_out(dev_net(sc->sc_dev), NULL, skb));
+	/* Send directly */
+	carp_send_ad_error(sc, dev_queue_xmit(skb));
 }
 
 /*
@@ -275,10 +283,10 @@ void carp_send_ad_locked(struct carp_softc *sc)
 
 	/* Schedule next advertisement */
 	tv.tv_sec = sc->sc_advbase;
-	tv.tv_usec = sc->sc_advskew * 1000000 / 256;
+	tv.tv_nsec = (long)sc->sc_advskew * 1000000000L / 256;
 
 	mod_timer(&sc->sc_ad_timer,
-		  jiffies + timespec6_to_jiffies(&tv));
+		  jiffies + timespec64_to_jiffies(&tv));
 }
 
 /*
@@ -306,7 +314,6 @@ static void carp_master_down_locked(struct carp_softc *sc, const char *reason)
 	if (sc->sc_naddrs6 > 0)
 		carp_send_na(sc);
 	carp_setrun(sc, 0);
-	carp_addroute(sc);
 }
 
 void carp_master_down_timer(struct timer_list *t)
@@ -346,31 +353,28 @@ void carp_setrun(struct carp_softc *sc, int af)
 	case CARP_STATE_BACKUP:
 		del_timer_sync(&sc->sc_ad_timer);
 		tv.tv_sec = 3 * sc->sc_advbase;
-		tv.tv_usec = sc->sc_advskew * 1000000 / 256;
+		tv.tv_nsec = (long)sc->sc_advskew * 1000000000L / 256;
 
 		if (af == AF_INET && sc->sc_naddrs > 0)
 			mod_timer(&sc->sc_md_timer,
-				  jiffies + timespec6_to_jiffies(&tv));
+				  jiffies + timespec64_to_jiffies(&tv));
 		else if (af == AF_INET6 && sc->sc_naddrs6 > 0)
 			mod_timer(&sc->sc_md6_timer,
-				  jiffies + timespec6_to_jiffies(&tv));
+				  jiffies + timespec64_to_jiffies(&tv));
 		else if (af == 0) {
 			if (sc->sc_naddrs > 0)
 				mod_timer(&sc->sc_md_timer,
-					  jiffies + tv.tv_sec * HZ +
-					  tv.tv_usec * HZ / 1000000);
+					  jiffies + timespec64_to_jiffies(&tv));
 			if (sc->sc_naddrs6 > 0)
 				mod_timer(&sc->sc_md6_timer,
-					  jiffies + tv.tv_sec * HZ +
-					  tv.tv_usec * HZ / 1000000);
+					  jiffies + timespec64_to_jiffies(&tv));
 		}
 		break;
 	case CARP_STATE_MASTER:
 		tv.tv_sec = sc->sc_advbase;
-		tv.tv_usec = DEMOTE_ADVSKEW(sc) * 1000000 / 256;
+		tv.tv_nsec = (long)DEMOTE_ADVSKEW(sc) * 1000000000L / 256;
 		mod_timer(&sc->sc_ad_timer,
-			  jiffies + tv.tv_sec * HZ +
-			  tv.tv_usec * HZ / 1000000);
+			  jiffies + timespec64_to_jiffies(&tv));
 		break;
 	}
 }
@@ -392,8 +396,8 @@ void carp_send_arp(struct carp_softc *sc)
 			 sc->sc_ifas4[i]->ifa_local,
 			 sc->sc_dev, /* target */
 			 sc->sc_ifas4[i]->ifa_local,  /* source = target */
-			 sc->sc_lladdr,  /* sender hw addr */
-			 NULL,  /* target hw addr = broadcast */
+			 sc->sc_lladdr,                /* src_hw = virtual MAC */
+			 NULL,                          /* dest_hw = broadcast */
 			 NULL);
 	}
 }
@@ -408,12 +412,12 @@ void carp_send_na(struct carp_softc *sc)
 	for (i = 0; i < sc->sc_naddrs6; i++) {
 		if (!sc->sc_ifas6[i])
 			continue;
-		ndisc_send_na(sc->sc_dev, NULL,
+		ndisc_send_na(sc->sc_dev, &in6addr_any,
 			      &sc->sc_ifas6[i]->ifra_addr.sin6_addr,
-			      0,  /* router = 0 */
-			      1,  /* solicited = 0 */
-			      1,  /* override = 1 */
-			      sc->sc_lladdr);
+			      false,  /* router */
+			      false,  /* solicited */
+			      true,   /* override */
+			      true);  // inc_opt (include LL addr option)
 	}
 }
 
@@ -426,7 +430,7 @@ void carp_send_na(struct carp_softc *sc)
  * Equivalent to FreeBSD carp_best_ifa(): iterates addresses and
  * picks the preferred one.
  */
-static struct in_ifaddr *carp_best_ifa4(struct net_device *dev)
+struct in_ifaddr *carp_best_ifa4(struct net_device *dev)
 {
 	struct in_device *in_dev;
 	struct in_ifaddr *ifa, *best = NULL;
@@ -440,9 +444,9 @@ static struct in_ifaddr *carp_best_ifa4(struct net_device *dev)
 			continue;
 		if (!best)
 			best = ifa;
-		/* Prefer primary address (ifa_flags & IFA_F_PRIMARY) */
-		else if ((ifa->ifa_flags & IFA_F_PRIMARY) &&
-			 !(best->ifa_flags & IFA_F_PRIMARY))
+		/* Prefer primary address (ifa_flags & IFA_F_PERMANENT) */
+		else if ((ifa->ifa_flags & IFA_F_PERMANENT) &&
+			 !(best->ifa_flags & IFA_F_PERMANENT))
 			best = ifa;
 	}
 
@@ -451,21 +455,21 @@ static struct in_ifaddr *carp_best_ifa4(struct net_device *dev)
 	return best;
 }
 
-static struct in6_ifaddr *carp_best_ifa6(struct net_device *dev)
+struct inet6_ifaddr *carp_best_ifa6(struct net_device *dev)
 {
 	struct inet6_dev *idev;
-	struct in6_ifaddr *ifa6, *best = NULL;
+	struct inet6_ifaddr *ifa6, *best = NULL;
 
 	idev = __in6_dev_get(dev);
 	if (!idev)
 		return NULL;
 
 	list_for_each_entry_rcu(ifa6, &idev->if_list, if_list) {
-		if (IN6_IS_ADDR_UNSPECIFIED(&ifa6->addr))
+		if (ipv6_addr_any(&ifa6->addr))
 			continue;
 		if (!best)
 			best = ifa6;
-		/* Prefer primary */
+		/* Prefer permanent (static) addresses over temporary */
 		else if ((ifa6->flags & IFA_F_PERMANENT) &&
 			 !(best->flags & IFA_F_PERMANENT))
 			best = ifa6;

@@ -21,7 +21,7 @@ install: all
 
 uninstall:
 	rm -f /lib/modules/*/extra/carp.ko
-	rm -f /usr/local/sbin/carpctl
+	rm -f /usr/local/sbin/carpd
 	depmod -a
 
 test:

@@ -1,6 +1,6 @@
 # Kbuild Makefile for CARP Linux kernel module
 obj-m := carp.o
-carp-objs := carp_main.o carp_input.o carp_output.o carp_route.o carp_netlink.o
+carp-objs := carp_main.o carp_input.o carp_output.o carp_netlink.o carp_netdev.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)

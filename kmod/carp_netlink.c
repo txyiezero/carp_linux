@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
 #include "carp_internal.h"
-#include <net/netns/generic.h>
 
 /* Forward declarations */
 static struct genl_family carp_genl_family;
@@ -69,7 +68,7 @@ EXPORT_SYMBOL(carp_iamatch4);
  * Check if an IPv6 address belongs to a CARP MASTER interface.
  * FreeBSD: carp_iamatch6() — called from nd6_nbr.c for NDP replies
  */
-struct in6_ifaddr *carp_iamatch6(struct net_device *dev,
+struct inet6_ifaddr *carp_iamatch6(struct net_device *dev,
 				     const struct in6_addr *addr)
 {
 	struct carp_softc *sc;
@@ -339,7 +338,6 @@ static int carp_nl_set(struct sk_buff *skb, struct genl_info *info)
 			carp_set_state(sc, CARP_STATE_BACKUP,
 				       "user requested");
 			carp_setrun(sc, 0);
-			carp_delroute(sc);
 			break;
 		case CARP_STATE_MASTER:
 			carp_master_down_locked(sc, "user requested");

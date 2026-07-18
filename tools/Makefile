@@ -1,16 +1,21 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -O2 -I../include
+CFLAGS = -Wall -Wextra -O2
 LDFLAGS =
 
-all: carpctl
+OBJS = carpd.o carpd_netlink.o carpd_cmd.o carpd_daemon.o
 
-carpctl: carpctl.c
-	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+all: carpd
+
+carpd: $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+%.o: %.c carpd.h
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f carpctl
+	rm -f carpd $(OBJS)
 
-install: carpctl
-	install -m 755 carpctl /usr/local/sbin/
+install: carpd
+	install -m 755 carpd /usr/local/sbin/
 
 .PHONY: all clean install

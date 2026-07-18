@@ -1,6 +1,6 @@
 #!/bin/bash
 # CARP integration test using ip netns
-# Tests: module load, failover, carpctl add/status/del
+# Tests: module load, failover, carpd add/status/del
 set -e
 
 PASS_COUNT=0
@@ -79,23 +79,23 @@ ip netns exec carp_ns2 ip addr add 192.168.1.4/24 dev veth2
 
 # --- Test 4: Add CARP VHID ---
 log "Adding CARP VHID..."
-if [ -x ../tools/carpctl ]; then
-    CARPCTL="../tools/carpctl"
+if [ -x ../tools/carpd ]; then
+    CARPD="../tools/carpd"
 else
-    CARPCTL="carpctl"
+    CARPD="carpd"
 fi
 
-$CARPCTL add veth1 1 --advbase 1 --advskew 0 --addr 192.168.1.100 2>/dev/null && \
-    pass "carpctl add succeeded" || fail "carpctl add failed"
+$CARPD add veth1 1 --advbase 1 --advskew 0 --addr 192.168.1.100 2>/dev/null && \
+    pass "carpd add succeeded" || fail "carpd add failed"
 
 # --- Test 5: Check status ---
 log "Checking status..."
-STATUS=$($CARPCTL status veth1 1 2>/dev/null)
+STATUS=$($CARPD status veth1 1 2>/dev/null)
 if echo "$STATUS" | grep -q "vhid 1"; then
-    pass "carpctl status shows vhid 1"
+    pass "carpd status shows vhid 1"
     echo "  $STATUS"
 else
-    fail "carpctl status missing vhid 1"
+    fail "carpd status missing vhid 1"
 fi
 
 # --- Test 6: Check /proc/net/carp/interfaces ---
@@ -118,23 +118,23 @@ fi
 
 # --- Test 8: Add second VHID ---
 log "Adding second VHID..."
-$CARPCTL add veth1 2 --advbase 1 --advskew 100 --addr 192.168.1.200 2>/dev/null && \
-    pass "carpctl add vhid 2 succeeded" || fail "carpctl add vhid 2 failed"
+$CARPD add veth1 2 --advbase 1 --advskew 100 --addr 192.168.1.200 2>/dev/null && \
+    pass "carpd add vhid 2 succeeded" || fail "carpd add vhid 2 failed"
 
-STATUS2=$($CARPCTL status veth1 2 2>/dev/null)
+STATUS2=$($CARPD status veth1 2 2>/dev/null)
 if echo "$STATUS2" | grep -q "vhid 2"; then
-    pass "carpctl status shows vhid 2"
+    pass "carpd status shows vhid 2"
 else
-    fail "carpctl status missing vhid 2"
+    fail "carpd status missing vhid 2"
 fi
 
 # --- Test 9: Delete VHID ---
 log "Deleting VHID..."
-$CARPCTL del veth1 2 2>/dev/null && \
-    pass "carpctl del vhid 2 succeeded" || fail "carpctl del vhid 2 failed"
+$CARPD del veth1 2 2>/dev/null && \
+    pass "carpd del vhid 2 succeeded" || fail "carpd del vhid 2 failed"
 
 # --- Test 10: Verify delete ---
-STATUS3=$($CARPCTL status veth1 2 2>/dev/null)
+STATUS3=$($CARPD status veth1 2 2>/dev/null)
 if ! echo "$STATUS3" | grep -q "vhid 2"; then
     pass "VHID 2 deleted successfully"
 else

@@ -32,6 +32,9 @@ struct carp_header {
 
 #define CARP_HDR_LEN		36
 #define CARP_DFLTTL		255
+#ifndef IPPROTO_CARP
+#define IPPROTO_CARP		112
+#endif
 #define CARP_VERSION		2
 #define CARP_ADVERTISEMENT	0x01
 #define CARP_KEY_LEN		20
@@ -39,6 +42,7 @@ struct carp_header {
 #define CARP_MAXVHID		255
 #define CARP_MAXSKEW		240
 #define CARP_MAXSTATE		2
+#define CARP_STATES		"INIT", "BACKUP", "MASTER"
 
 #define CARP_STATE_INIT		0
 #define CARP_STATE_BACKUP	1
