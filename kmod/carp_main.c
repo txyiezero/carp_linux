@@ -333,7 +333,6 @@ int carp_attach_address(struct carp_softc *sc, int af, void *addr)
 		sc->sc_cif->cif_naddrs++;
 		spin_unlock(&sc->sc_cif->cif_lock);
 
-		carp_hmac_prepare(sc);
 		carp_sc_state(sc);
 		break;
 	}
@@ -353,7 +352,6 @@ int carp_attach_address(struct carp_softc *sc, int af, void *addr)
 		sc->sc_cif->cif_naddrs6++;
 		spin_unlock(&sc->sc_cif->cif_lock);
 
-		carp_hmac_prepare(sc);
 		carp_sc_state(sc);
 		break;
 	}
@@ -414,7 +412,6 @@ void carp_detach_address(struct carp_softc *sc, int af, void *addr)
 	}
 	}
 
-	carp_hmac_prepare(sc);
 	carp_sc_state(sc);
 	carp_multicast_setup(sc);
 

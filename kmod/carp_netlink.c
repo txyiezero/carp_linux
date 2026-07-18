@@ -321,8 +321,7 @@ static int carp_nl_set(struct sk_buff *skb, struct genl_info *info)
 		if (key_len > 0 && key_len <= CARP_KEY_LEN) {
 			memcpy(sc->sc_key, nla_data(info->attrs[CARP_NL_KEY]),
 			       key_len);
-			carp_hmac_prepare(sc);
-		}
+			}
 	}
 
 	if (info->attrs[CARP_NL_ADDR])
