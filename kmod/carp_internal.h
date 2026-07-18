@@ -166,6 +166,8 @@ extern struct carpstats __percpu *carp_stats;
 struct in_ifaddr *carp_best_ifa4(struct net_device *dev);
 struct inet6_ifaddr *carp_best_ifa6(struct net_device *dev);
 
-/* NF hook registered in carp_main.c */
+/* ---- Network device integration (carp_netdev.c) ---- */
+int carp_netdev_init(void);
+void carp_netdev_exit(void);
 
 #endif /* _CARP_INTERNAL_H */
