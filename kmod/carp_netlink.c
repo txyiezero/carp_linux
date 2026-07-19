@@ -314,7 +314,7 @@ static int carp_nl_set(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	if (info->attrs[CARP_NL_ADDR])
-		sc->sc_carpaddr = nla_get_in_addr(info->attrs[CARP_NL_ADDR]);
+		sc->sc_carpaddr.s_addr = nla_get_in_addr(info->attrs[CARP_NL_ADDR]);
 	if (info->attrs[CARP_NL_ADDR6])
 		memcpy(&sc->sc_carpaddr6, nla_data(info->attrs[CARP_NL_ADDR6]),
 		       sizeof(sc->sc_carpaddr6));

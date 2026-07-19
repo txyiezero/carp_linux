@@ -129,6 +129,7 @@ void carp_send_ad_error(struct carp_softc *sc, int error);
 void carp_send_arp(struct carp_softc *sc);
 void carp_send_na(struct carp_softc *sc);
 void carp_setrun(struct carp_softc *sc, int af);
+void carp_master_down_locked(struct carp_softc *sc, const char *reason);
 void carp_master_down_timer(struct timer_list *t);
 void carp_master_down6_timer(struct timer_list *t);
 void carp_set_state(struct carp_softc *sc, int state, const char *reason);
