@@ -41,7 +41,7 @@ void carp_send_ad_error(struct carp_softc *sc, int error)
  * Deferred work: re-send advertisements for all MASTER interfaces.
  * FreeBSD: carp_send_ad_all() via taskqueue_swi
  */
-static void carp_sendall_work_func(struct work_struct *work)
+void carp_sendall_work_func(struct work_struct *work)
 {
 	struct carp_softc *sc;
 
@@ -98,8 +98,7 @@ static void carp_send_ad_v4(struct carp_softc *sc)
 	struct ethhdr *eth;
 	struct iphdr *iph;
 	struct carp_header *ch;
-	int total_len;
-	int hlen;
+	int total_len, hlen;
 	__be16 id;
 
 	/* Total: Ethernet + IP + CARP */
@@ -291,12 +290,11 @@ void carp_send_ad_locked(struct carp_softc *sc)
 	tv.tv_sec = sc->sc_advbase;
 	tv.tv_nsec = (long)DEMOTE_ADVSKEW(sc) * 1000000000L / 256;
 
-	mod_timer(&sc->sc_ad_timer,
-		  jiffies + timespec64_to_jiffies(&tv));
+	mod_timer(&sc->sc_ad_timer, jiffies + timespec64_to_jiffies(&tv));
 }
 
 /* Timer callback: send periodic advertisement. */
-static void carp_send_ad_timer(struct timer_list *t)
+void carp_send_ad_timer(struct timer_list *t)
 {
 	struct carp_softc *sc = from_timer(sc, t, sc_ad_timer);
 
@@ -317,15 +315,13 @@ static void carp_master_down_locked(struct carp_softc *sc, const char *reason)
 		if (sc->sc_naddrs6 > 0)
 			carp_send_na(sc);
 		carp_setrun(sc, 0);
-		carp_addroute(sc);
 		break;
-	case CARP_STATE_INIT:
-	case CARP_STATE_MASTER:
+	default:
 		break;
 	}
 }
 
-static void carp_master_down_timer(struct timer_list *t)
+void carp_master_down_timer(struct timer_list *t)
 {
 	struct carp_softc *sc = from_timer(sc, t, sc_md_timer);
 
@@ -333,7 +329,7 @@ static void carp_master_down_timer(struct timer_list *t)
 		carp_master_down_locked(sc, "master timed out");
 }
 
-static void carp_master_down6_timer(struct timer_list *t)
+void carp_master_down6_timer(struct timer_list *t)
 {
 	struct carp_softc *sc = from_timer(sc, t, sc_md6_timer);
 
@@ -365,25 +361,20 @@ void carp_setrun(struct carp_softc *sc, int af)
 		tv.tv_nsec = (long)sc->sc_advskew * 1000000000L / 256;
 
 		if (af == AF_INET && sc->sc_naddrs > 0)
-			mod_timer(&sc->sc_md_timer,
-				  jiffies + timespec64_to_jiffies(&tv));
+			mod_timer(&sc->sc_md_timer, jiffies + timespec64_to_jiffies(&tv));
 		else if (af == AF_INET6 && sc->sc_naddrs6 > 0)
-			mod_timer(&sc->sc_md6_timer,
-				  jiffies + timespec64_to_jiffies(&tv));
+			mod_timer(&sc->sc_md6_timer, jiffies + timespec64_to_jiffies(&tv));
 		else if (af == 0) {
 			if (sc->sc_naddrs > 0)
-				mod_timer(&sc->sc_md_timer,
-					  jiffies + timespec64_to_jiffies(&tv));
+				mod_timer(&sc->sc_md_timer, jiffies + timespec64_to_jiffies(&tv));
 			if (sc->sc_naddrs6 > 0)
-				mod_timer(&sc->sc_md6_timer,
-					  jiffies + timespec64_to_jiffies(&tv));
+				mod_timer(&sc->sc_md6_timer, jiffies + timespec64_to_jiffies(&tv));
 		}
 		break;
 	case CARP_STATE_MASTER:
 		tv.tv_sec = sc->sc_advbase;
 		tv.tv_nsec = (long)DEMOTE_ADVSKEW(sc) * 1000000000L / 256;
-		mod_timer(&sc->sc_ad_timer,
-			  jiffies + timespec64_to_jiffies(&tv));
+		mod_timer(&sc->sc_ad_timer, jiffies + timespec64_to_jiffies(&tv));
 		break;
 	}
 }
