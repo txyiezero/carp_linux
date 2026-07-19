@@ -18,7 +18,6 @@
 #include <linux/genetlink.h>
 #include <linux/netlink.h>
 #include <sys/stat.h>
-#include <linux/kobject.h>
 #include <signal.h>
 
 /* CARP protocol definitions (shared with kernel module) */
