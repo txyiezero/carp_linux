@@ -37,7 +37,9 @@ void carp_hmac_generate(struct carp_softc *sc, u32 counter[2], u8 md[20])
 	u8 version = CARP_VERSION;
 	u8 type = CARP_ADVERTISEMENT;
 	u8 vhid = sc->sc_vhid & 0xff;
-	int j, k;
+	__be32 *sorted_addrs = NULL;
+	struct in6_addr *sorted_addrs6 = NULL;
+	int j, k, n;
 
 	crypto_shash_setkey(carp_tfm, sc->sc_key, CARP_KEY_LEN);
 
@@ -48,16 +50,16 @@ void carp_hmac_generate(struct carp_softc *sc, u32 counter[2], u8 md[20])
 
 	/* IPv4 addresses in sorted order */
 	{
-		__be32 *sorted_addrs = kmalloc_array(sc->sc_naddrs, sizeof(__be32), GFP_ATOMIC);
+		n = sc->sc_naddrs;
+		sorted_addrs = kmalloc_array(n, sizeof(__be32), GFP_ATOMIC);
 		if (!sorted_addrs) {
 			memset(md, 0, 20);
 			goto out;
 		}
-		int n = 0;
 		rcu_read_lock();
-		for (j = 0; j < n_addrs; j++) {
+		for (j = 0; j < n; j++) {
 			if (sc->sc_ifas4[j])
-				sorted_addrs[n++] = sc->sc_ifas4[j]->ifa_local;
+				sorted_addrs[j] = sc->sc_ifas4[j]->ifa_local;
 		}
 		rcu_read_unlock();
 		for (j = 1; j < n; j++) {
@@ -76,16 +78,16 @@ void carp_hmac_generate(struct carp_softc *sc, u32 counter[2], u8 md[20])
 
 	/* IPv6 addresses in sorted order */
 	{
-		struct in6_addr *sorted_addrs6 = kmalloc_array(sc->sc_naddrs6, sizeof(*struct in6_addr), GFP_ATOMIC);
+		n = sc->sc_naddrs6;
+		sorted_addrs6 = kmalloc_array(n, sizeof(struct in6_addr), GFP_ATOMIC);
 		if (!sorted_addrs6) {
 			memset(md, 0, 20);
 			goto out;
 		}
-		int n = 0;
 		rcu_read_lock();
-		for (j = 0; j < sc->sc_naddrs6 && n < n_addrs; j++) {
+		for (j = 0; j < n; j++) {
 			if (sc->sc_ifas6[j])
-				sorted_addrs6[n++] = sc->sc_ifas6[j]->addr;
+				sorted_addrs6[j] = sc->sc_ifas6[j]->addr;
 		}
 		rcu_read_unlock();
 		for (j = 1; j < n; j++) {
