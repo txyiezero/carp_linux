@@ -8,17 +8,26 @@
 #ifndef _UAPI_LINUX_CARP_H
 #define _UAPI_LINUX_CARP_H
 
+#ifdef __KERNEL__
 #include <linux/types.h>
+#else
+#include <stdint.h>
+typedef uint8_t __u8;
+typedef uint16_t __u16;
+typedef uint32_t __u32;
+typedef __u32 __be32;
+typedef __u16 __be16;
+#endif
 
 struct carp_header {
-#if defined(__LITTLE_ENDIAN_BITFIELD)
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 	__u8	carp_type:4,
 		carp_version:4;
-#elif defined(__BIG_ENDIAN_BITFIELD)
+#elif defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 	__u8	carp_version:4,
 		carp_type:4;
 #else
-#error "Please fix <asm/byteorder.h>"
+#error "Unknown byte order"
 #endif
 	__u8	carp_vhid;
 	__u8	carp_advskew;
