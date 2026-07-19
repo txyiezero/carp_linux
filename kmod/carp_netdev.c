@@ -4,6 +4,10 @@
  * Handles: protocol 112 registration, NF hook, device event notifications.
  */
 #include "carp_internal.h"
+#include <net/protocol.h>
+#include <linux/netfilter.h>
+#include <linux/netfilter_ipv4.h>
+#include <linux/netfilter_ipv6.h>
 
 /*
  * Protocol 112 handler registration.
