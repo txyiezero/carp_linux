@@ -59,7 +59,7 @@ int find_genl_family(const char *name)
 {
 	struct {
 		struct nlmsghdr nlh;
-		struct genlmsg gnlh;
+		struct genlmsghdr gnlh;
 	} req = {
 		.nlh.nlmsg_type = GENL_ID_CTRL,
 		.nlh.nlmsg_len = sizeof(req),
