@@ -309,8 +309,6 @@ void carp_master_down_locked(struct carp_softc *sc, const char *reason)
 		carp_send_ad_locked(sc);
 		if (sc->sc_naddrs > 0)
 			carp_send_arp(sc);
-		if (sc->sc_naddrs6 > 0)
-			carp_send_na(sc);
 		carp_setrun(sc, 0);
 		break;
 	default:
@@ -406,58 +404,6 @@ void carp_send_arp(struct carp_softc *sc)
  * FreeBSD: ndisc_send_na() — exported
  * Linux: ndisc_send_na() not exported; build NA packet manually via ndisc_send_skb
  */
-void carp_send_na(struct carp_softc *sc)
-{
-	int i;
-
-	rcu_read_lock();
-	for (i = 0; i < sc->sc_naddrs6; i++) {
-		struct sk_buff *skb;
-		struct nd_msg *msg;
-		struct nd_opt_hdr *opt;
-		int optlen;
-
-		if (!sc->sc_ifas6[i])
-			continue;
-
-		/* Target LLA option length (8 bytes: type + len + 6 bytes MAC) */
-		optlen = 8;
-
-		skb = alloc_skb(sizeof(*msg) + optlen + LL_RESERVED_SPACE(sc->sc_dev), GFP_ATOMIC);
-		if (!skb)
-			continue;
-
-		skb_reserve(skb, LL_RESERVED_SPACE(sc->sc_dev));
-		skb->dev = sc->sc_dev;
-		skb->protocol = htons(ETH_P_IPV6);
-
-		/* Build NA message */
-		msg = skb_put(skb, sizeof(*msg));
-		memset(msg, 0, sizeof(*msg));
-		msg->icmph.icmp6_type = NDISC_NEIGHBOUR_ADVERTISEMENT;
-		msg->icmph.icmp6_code = 0;
-		msg->icmph.icmp6_router = 0;     /* not a router */
-		msg->icmph.icmp6_solicited = 0;  /* unsolicited */
-		msg->icmph.icmp6_override = 1;   /* override cached entry */
-		msg->target = sc->sc_ifas6[i]->addr;
-
-		/* Add target LLA option */
-		opt = skb_put(skb, optlen);
-		opt->nd_opt_type = ND_OPT_TARGET_LL_ADDR;
-		opt->nd_opt_len = 1;  /* 8 bytes / 8 = 1 */
-		memcpy(opt + 1, sc->sc_lladdr, ETH_ALEN);
-
-		{
-			struct in6_addr allnodes = IN6ADDR_ANY_INIT;
-			allnodes.s6_addr[0] = 0xff;
-			allnodes.s6_addr[1] = 0x02;
-			allnodes.s6_addr[15] = 0x01;  /* ff02::1 */
-			n_disc_send_skb(skb, &allnodes, &in6addr_any);
-		}
-	}
-	rcu_read_unlock();
-}
-
 /*
  * Find the best IPv4 address on an interface.
  */

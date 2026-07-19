@@ -265,8 +265,6 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 			carp_send_ad_locked(sc);
 			if (af == AF_INET)
 				carp_send_arp(sc);
-			if (af == AF_INET6)
-				carp_send_na(sc);
 			carp_setrun(sc, 0);
 			break;
 		}
@@ -284,8 +282,6 @@ void carp_input_c(struct sk_buff *skb, struct carp_header *ch,
 			carp_send_ad_locked(sc);
 			if (af == AF_INET)
 				carp_send_arp(sc);
-			if (af == AF_INET6)
-				carp_send_na(sc);
 			carp_setrun(sc, 0);
 			break;
 		}
