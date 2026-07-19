@@ -4,9 +4,6 @@
  */
 #include "carp_internal.h"
 
-/* Forward declarations */
-static void carp_master_down_locked(struct carp_softc *sc, const char *reason);
-
 /*
  * Send error demotion: track consecutive send failures.
  * 3 failures -> raise advskew (demote), let other nodes take over.
@@ -304,7 +301,7 @@ void carp_send_ad_timer(struct timer_list *t)
 /*
  * Master down: promote to MASTER.
  */
-static void carp_master_down_locked(struct carp_softc *sc, const char *reason)
+void carp_master_down_locked(struct carp_softc *sc, const char *reason)
 {
 	switch (sc->sc_state) {
 	case CARP_STATE_BACKUP:
